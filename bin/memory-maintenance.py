@@ -15,6 +15,7 @@ Called by scheduler daily at 3 AM.
 import json
 import logging
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -129,14 +130,23 @@ Excerpt: {summary}
 Respond with ONLY a number 1-10."""
 
     try:
-        result = subprocess.run(
-            ["claude", "-p", prompt, "--model", "haiku", "--max-turns", "1"],
-            capture_output=True,
-            text=True,
-            timeout=20
-        )
-        score_str = result.stdout.strip()
-        score = float(score_str)
+        if os.environ.get("AGENT_BACKEND", "claude") == "ollama":
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+            from ollama_runner import run_oneshot
+            ok, score_str, _meta = run_oneshot(prompt)
+            if not ok:
+                raise RuntimeError("ollama oneshot failed")
+        else:
+            result = subprocess.run(
+                ["claude", "-p", prompt, "--model", "haiku", "--max-turns", "1"],
+                capture_output=True,
+                text=True,
+                timeout=20
+            )
+            score_str = result.stdout.strip()
+        # Local models often wrap the number in prose; grab the first integer.
+        match = re.search(r"\d+(?:\.\d+)?", score_str)
+        score = float(match.group()) if match else 5.0
         return max(1.0, min(10.0, score))
     except Exception as e:
         log.warning(f"Failed to score importance: {e}, defaulting to 5.0")

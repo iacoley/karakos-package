@@ -32,7 +32,14 @@ if [[ -z "$BUILDER_AGENT" ]]; then
 fi
 
 BUILDER_DIR="$WORKSPACE_ROOT/agents/$BUILDER_AGENT"
-MODEL="${MODEL:-sonnet}"
+# Backend selection: "claude" (default) drives the Claude Code CLI; "ollama"
+# routes through the minimal native runner against a local Ollama server.
+AGENT_BACKEND="${AGENT_BACKEND:-claude}"
+if [[ "$AGENT_BACKEND" == "ollama" ]]; then
+    MODEL="${MODEL:-${OLLAMA_MODEL:-llama3.1}}"
+else
+    MODEL="${MODEL:-sonnet}"
+fi
 DISPATCH_ID="${DISPATCH_ID:-}"
 OUTPUT_FORMAT="stream-json"
 
@@ -122,15 +129,23 @@ if [[ ! -f "$SYSTEM_PROMPT" ]]; then
     exit 1
 fi
 
-echo "Invoking builder: $BUILDER_AGENT (model=$MODEL)"
+echo "Invoking builder: $BUILDER_AGENT (backend=$AGENT_BACKEND, model=$MODEL)"
 echo "Working directory: $WORK_DIR"
+
+# Select the engine. Both speak the same stream-json `result` event, so the
+# metadata extraction below is backend-agnostic.
+if [[ "$AGENT_BACKEND" == "ollama" ]]; then
+    ENGINE=(python3 "$WORKSPACE_ROOT/bin/ollama_runner.py" --mode agent)
+else
+    ENGINE=(claude)
+fi
 
 # Create metadata file for cost extraction
 METADATA_FILE=$(mktemp)
 trap "rm -f $METADATA_FILE" EXIT
 
 # Run builder
-timeout 21600 claude -p "$PROMPT" \
+timeout 21600 "${ENGINE[@]}" -p "$PROMPT" \
     --model "$MODEL" \
     --max-turns 200 \
     --system-prompt "$SYSTEM_PROMPT" \

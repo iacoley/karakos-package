@@ -8,11 +8,17 @@ required headers, and outputs to checkpoint file for next session re-injection.
 
 import argparse
 import json
+import os
 import sys
 import subprocess
 import time
 from pathlib import Path
 from datetime import datetime
+
+# Backend selection — "claude" (default) shells out to the Claude CLI; "ollama"
+# imports the minimal native runner from the sibling bin/ directory.
+AGENT_BACKEND = os.environ.get("AGENT_BACKEND", "claude")
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 WORKSPACE_ROOT = Path("/workspace")
 STREAM_LOG_DIR = WORKSPACE_ROOT / "logs" / "agent-streams"
@@ -77,8 +83,19 @@ def read_recent_stream(agent: str, limit: int = 50) -> str:
     return "\n".join(formatted)
 
 def call_summarizer(stream_content: str) -> tuple[bool, str, dict]:
-    """Call Claude to generate summary"""
+    """Call the configured backend to generate a summary"""
     prompt = SUMMARIZER_PROMPT.format(stream_content=stream_content)
+
+    if AGENT_BACKEND == "ollama":
+        from ollama_runner import run_oneshot
+        ok, summary, meta = run_oneshot(prompt)
+        if not ok:
+            return False, "", meta
+        summary = summary.strip()
+        missing = [h for h in REQUIRED_HEADERS if h not in summary]
+        if missing:
+            return False, summary, {**meta, "error": "missing_headers", "missing": missing}
+        return True, summary, meta
 
     cmd = [
         "claude", "-p", prompt,

@@ -30,6 +30,11 @@ services:
       - "${DASHBOARD_PORT:-3000}:${DASHBOARD_PORT:-3000}"
       - "127.0.0.1:${AGENT_SERVER_PORT:-18791}:${AGENT_SERVER_PORT:-18791}"
     restart: unless-stopped
+    # Lets the container reach an Ollama server running on the host via
+    # OLLAMA_HOST=http://host.docker.internal:11434 (Linux needs this mapping
+    # explicitly; Docker Desktop on macOS/Windows provides it automatically).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       - TZ=${TZ:-UTC}
     healthcheck:

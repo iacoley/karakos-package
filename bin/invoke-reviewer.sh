@@ -32,7 +32,14 @@ if [[ -z "$REVIEWER_AGENT" ]]; then
 fi
 
 REVIEWER_DIR="$WORKSPACE_ROOT/agents/$REVIEWER_AGENT"
-MODEL="${MODEL:-sonnet}"
+# Backend selection: "claude" (default) drives the Claude Code CLI; "ollama"
+# routes through the minimal native runner against a local Ollama server.
+AGENT_BACKEND="${AGENT_BACKEND:-claude}"
+if [[ "$AGENT_BACKEND" == "ollama" ]]; then
+    MODEL="${MODEL:-${OLLAMA_MODEL:-llama3.1}}"
+else
+    MODEL="${MODEL:-sonnet}"
+fi
 DISPATCH_ID="${DISPATCH_ID:-}"
 OUTPUT_FORMAT="stream-json"
 CODEBASE_REVIEW=false
@@ -118,13 +125,21 @@ if [[ ! -f "$SYSTEM_PROMPT" ]]; then
     exit 1
 fi
 
-echo "Invoking reviewer: $REVIEWER_AGENT (model=$MODEL, iteration=$ITERATION)"
+echo "Invoking reviewer: $REVIEWER_AGENT (backend=$AGENT_BACKEND, model=$MODEL, iteration=$ITERATION)"
+
+# Select the engine. Both speak the same stream-json `result` event, so the
+# verdict/cost extraction below is backend-agnostic.
+if [[ "$AGENT_BACKEND" == "ollama" ]]; then
+    ENGINE=(python3 "$WORKSPACE_ROOT/bin/ollama_runner.py" --mode agent)
+else
+    ENGINE=(claude)
+fi
 
 METADATA_FILE=$(mktemp)
 trap "rm -f $METADATA_FILE" EXIT
 
 # Run reviewer
-timeout 3600 claude -p "$PROMPT" \
+timeout 3600 "${ENGINE[@]}" -p "$PROMPT" \
     --model "$MODEL" \
     --max-turns 200 \
     --system-prompt "$SYSTEM_PROMPT" \

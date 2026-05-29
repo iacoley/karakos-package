@@ -72,6 +72,7 @@ Env vars: `AGENT_SERVER_TOKEN` (required), `AGENT_SERVER_URL`
 - [DISCORD_SETUP.md](docs/DISCORD_SETUP.md) — Discord bot creation guide
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) — System architecture overview
 - [EXTENDING.md](docs/EXTENDING.md) — Adding skills and customizing agents
+- [OLLAMA.md](docs/OLLAMA.md) — Running builder/reviewer/summarizer on a local Ollama server
 - [UPGRADING.md](docs/UPGRADING.md) — Manual upgrade instructions
 
 ## Architecture
