@@ -117,6 +117,40 @@ if (-not $hasJq) {
     Write-Step "jq found."
 }
 
+# --- Install Python ---
+# Required on the host (not just inside the container) because the repo's
+# root .mcp.json registers `karakos-admin` as `python3 mcp/admin-server.py`.
+# Claude Code on the host spawns that MCP server, so it needs a real python3
+# on PATH. Windows 11 ships a `python3` Microsoft Store stub on PATH that
+# opens the Store and exits non-zero when invoked — treat that as "not
+# installed" and install the real thing.
+function Test-RealPython3 {
+    $cmd = Get-Command python3 -ErrorAction SilentlyContinue
+    if (-not $cmd) { return $false }
+    # Reject the WindowsApps Store stub (path under WindowsApps that exits 9009 on invoke).
+    if ($cmd.Source -like "*\WindowsApps\*") { return $false }
+    try {
+        $ver = & python3 --version 2>&1
+        return ($LASTEXITCODE -eq 0 -and $ver -match "^Python 3\.")
+    } catch {
+        return $false
+    }
+}
+
+if (-not (Test-RealPython3)) {
+    Write-Step "Installing Python 3.12..."
+    winget install --id Python.Python.3.12 -e --accept-source-agreements --accept-package-agreements
+    $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
+    if (-not (Test-RealPython3)) {
+        Write-Err "Python installed but 'python3' is not resolving on PATH."
+        Write-Err "You may need to restart your shell or sign out/in, then re-run install.ps1."
+        exit 1
+    }
+    Write-Step "Python 3.12 installed."
+} else {
+    Write-Step "Python found: $((& python3 --version) 2>&1)"
+}
+
 # --- Clone repository ---
 if (Test-Path $InstallDir) {
     Write-Step "Directory $InstallDir already exists."
