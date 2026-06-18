@@ -26,15 +26,21 @@ class TestPurgeMessages:
         purge = self._make_purger(tmp_workspace, monkeypatch)
         msgs_dir = tmp_workspace / "data" / "messages"
 
+        # Recent file is dated relative to now so it always falls inside the
+        # 30-day retention window. A hardcoded date here becomes a time bomb:
+        # once wall-clock passes date+30d the file is correctly purged and the
+        # assertion below breaks (regressed CI on 2026-05-11).
+        recent = (datetime.now(timezone.utc) - timedelta(days=10)).strftime("%Y-%m-%d")
+
         (msgs_dir / "messages-2026-01-01.jsonl").write_text('{"test": true}\n')
         (msgs_dir / "messages-2026-02-01.jsonl").write_text('{"test": true}\n')
-        (msgs_dir / "messages-2026-04-10.jsonl").write_text('{"test": true}\n')
+        (msgs_dir / f"messages-{recent}.jsonl").write_text('{"test": true}\n')
 
         deleted = purge.purge_old_messages()
 
         assert not (msgs_dir / "messages-2026-01-01.jsonl").exists()
         assert not (msgs_dir / "messages-2026-02-01.jsonl").exists()
-        assert (msgs_dir / "messages-2026-04-10.jsonl").exists()
+        assert (msgs_dir / f"messages-{recent}.jsonl").exists()
         assert deleted >= 2
 
     def test_keeps_recent_message_files(self, tmp_workspace, monkeypatch):
