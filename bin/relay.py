@@ -138,6 +138,30 @@ def load_config():
 
     log.info(f"Loaded config for {len(agent_config)} agents, {len(channels_config.get('channels', {}))} channels")
 
+
+def load_server_ids(config: Dict) -> set:
+    """Discord server IDs this relay will accept messages from.
+
+    `server_id` (a single string, what setup.sh writes) stays supported. A
+    system that also needs to reach a shared server — a second household, a
+    server where agents from different installs talk to each other — adds
+    `server_ids` alongside it, and both are honoured:
+
+        {"server_id": "111", "server_ids": ["222", "333"], "channels": {...}}
+
+    Channels are still matched by ID, so a channel only routes if it's listed
+    in `channels` regardless of which server it lives in.
+    """
+    ids = set()
+    single = config.get("server_id")
+    if single:
+        ids.add(str(single))
+    extra = config.get("server_ids") or []
+    if isinstance(extra, (str, int)):
+        extra = [extra]
+    ids.update(str(s) for s in extra if s)
+    return ids
+
 # =============================================================================
 # Discord Adapter
 # =============================================================================
@@ -153,14 +177,17 @@ class DiscordAdapter(discord.Client):
         super().__init__(intents=intents, *args, **kwargs)
 
         self.http_session = None
-        self.server_id = None
+        self.server_ids = set()
 
     async def setup_hook(self):
         """Initialize HTTP session"""
         import aiohttp
         self.http_session = aiohttp.ClientSession()
-        self.server_id = channels_config.get("server_id")
-        log.info("Discord adapter initialized")
+        self.server_ids = load_server_ids(channels_config)
+        log.info(
+            "Discord adapter initialized (servers: %s)",
+            ", ".join(sorted(self.server_ids)) or "none configured",
+        )
 
     async def on_ready(self):
         """Bot logged in"""
@@ -173,8 +200,8 @@ class DiscordAdapter(discord.Client):
         if message.author == self.user:
             return
 
-        # Ignore messages from other servers
-        if message.guild and str(message.guild.id) != self.server_id:
+        # Ignore messages from servers we aren't configured for
+        if message.guild and str(message.guild.id) not in self.server_ids:
             return
 
         # Capture message
