@@ -26,39 +26,36 @@ from logging.handlers import RotatingFileHandler
 # =============================================================================
 
 def split_discord_message(text: str, max_length: int = 2000) -> List[str]:
-    """Split text into Discord-compatible chunks (max 2000 chars per message)"""
+    """Split text into chunks Discord will accept (max 2000 chars each).
+
+    Splits on the largest boundary that fits — paragraph, then line, then a
+    hard cut mid-line. The hard cut is the part that matters: a reply with no
+    blank line and no newline in it has no boundary to split on, and the
+    previous implementation returned it as a single oversize chunk. Discord
+    rejects anything over 2000 with a 400 and the message is lost.
+    """
     if len(text) <= max_length:
-        return [text]
+        return [text] if text else []
 
-    chunks = []
-    # Try to split on paragraph boundaries first
-    paragraphs = text.split('\n\n')
-    current_chunk = ""
+    chunks: List[str] = []
+    remaining = text
 
-    for paragraph in paragraphs:
-        # If single paragraph is too long, split on newlines
-        if len(paragraph) > max_length:
-            lines = paragraph.split('\n')
-            for line in lines:
-                if len(current_chunk) + len(line) + 2 > max_length:
-                    if current_chunk:
-                        chunks.append(current_chunk.strip())
-                    current_chunk = line
-                else:
-                    current_chunk += ('\n' if current_chunk else '') + line
-        else:
-            if len(current_chunk) + len(paragraph) + 2 > max_length:
-                if current_chunk:
-                    chunks.append(current_chunk.strip())
-                current_chunk = paragraph
-            else:
-                current_chunk += ('\n\n' if current_chunk else '') + paragraph
+    while len(remaining) > max_length:
+        window = remaining[:max_length]
+        cut = window.rfind("\n\n")
+        if cut <= 0:
+            cut = window.rfind("\n")
+        if cut <= 0:
+            # A solid wall of text. Cut it at the limit rather than handing
+            # Discord something it will refuse.
+            cut = max_length
+        chunks.append(remaining[:cut].rstrip())
+        remaining = remaining[cut:].lstrip("\n")
 
-    if current_chunk:
-        chunks.append(current_chunk.strip())
+    if remaining:
+        chunks.append(remaining)
 
     return chunks if chunks else [text]
-
 # =============================================================================
 # Configuration
 # =============================================================================

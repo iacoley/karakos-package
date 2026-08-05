@@ -552,38 +552,36 @@ async def check_cost_limits(author_id: str) -> Dict[str, Any]:
 MAX_DISCORD_MSG_LEN = 2000
 
 def split_discord_message(text: str, max_length: int = MAX_DISCORD_MSG_LEN) -> List[str]:
-    """Split text into Discord-compatible chunks (max 2000 chars per message)"""
+    """Split text into chunks Discord will accept (max 2000 chars each).
+
+    Splits on the largest boundary that fits — paragraph, then line, then a
+    hard cut mid-line. The hard cut is the part that matters: a reply with no
+    blank line and no newline in it has no boundary to split on, and the
+    previous implementation returned it as a single oversize chunk. Discord
+    rejects anything over 2000 with a 400 and the message is lost.
+    """
     if len(text) <= max_length:
-        return [text]
+        return [text] if text else []
 
-    chunks = []
-    paragraphs = text.split('\n\n')
-    current_chunk = ""
+    chunks: List[str] = []
+    remaining = text
 
-    for paragraph in paragraphs:
-        if len(paragraph) > max_length:
-            # Split oversized paragraphs on newlines
-            lines = paragraph.split('\n')
-            for line in lines:
-                if len(current_chunk) + len(line) + 2 > max_length:
-                    if current_chunk:
-                        chunks.append(current_chunk.strip())
-                    current_chunk = line
-                else:
-                    current_chunk += ('\n' if current_chunk else '') + line
-        else:
-            if len(current_chunk) + len(paragraph) + 2 > max_length:
-                if current_chunk:
-                    chunks.append(current_chunk.strip())
-                current_chunk = paragraph
-            else:
-                current_chunk += ('\n\n' if current_chunk else '') + paragraph
+    while len(remaining) > max_length:
+        window = remaining[:max_length]
+        cut = window.rfind("\n\n")
+        if cut <= 0:
+            cut = window.rfind("\n")
+        if cut <= 0:
+            # A solid wall of text. Cut it at the limit rather than handing
+            # Discord something it will refuse.
+            cut = max_length
+        chunks.append(remaining[:cut].rstrip())
+        remaining = remaining[cut:].lstrip("\n")
 
-    if current_chunk:
-        chunks.append(current_chunk.strip())
+    if remaining:
+        chunks.append(remaining)
 
     return chunks if chunks else [text]
-
 async def post_to_discord(agent: str, channel_id: str, content: str, reply_to: Optional[str] = None) -> Optional[str]:
     """Post message to Discord as agent, splitting if over 2000 chars"""
     global http_session
@@ -611,18 +609,21 @@ async def post_to_discord(agent: str, channel_id: str, content: str, reply_to: O
 
     chunks = split_discord_message(content)
     last_msg_id = None
+    failed = 0
 
-    for chunk in chunks:
+    for idx, chunk in enumerate(chunks):
         payload = {"content": chunk}
         # Only reply-reference the first chunk
         if reply_to and last_msg_id is None:
             payload["message_reference"] = {"message_id": reply_to}
 
+        posted = False
         try:
             async with http_session.post(url, headers=headers, json=payload) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     last_msg_id = data.get("id")
+                    posted = True
                 elif resp.status == 429:
                     retry_after = (await resp.json()).get("retry_after", 1)
                     log.warning(f"Rate limited posting to {channel_id}, retry after {retry_after}s")
@@ -632,10 +633,35 @@ async def post_to_discord(agent: str, channel_id: str, content: str, reply_to: O
                         if retry_resp.status == 200:
                             data = await retry_resp.json()
                             last_msg_id = data.get("id")
+                            posted = True
+                        else:
+                            log.error(
+                                f"Discord API error {retry_resp.status} on chunk "
+                                f"{idx + 1}/{len(chunks)} ({len(chunk)} chars) after "
+                                f"rate-limit retry: {await retry_resp.text()}"
+                            )
                 else:
-                    log.error(f"Discord API error {resp.status}: {await resp.text()}")
+                    log.error(
+                        f"Discord API error {resp.status} on chunk "
+                        f"{idx + 1}/{len(chunks)} ({len(chunk)} chars): "
+                        f"{await resp.text()}"
+                    )
         except Exception as e:
-            log.error(f"Error posting to Discord: {e}")
+            log.error(f"Error posting chunk {idx + 1}/{len(chunks)} to Discord: {e}")
+
+        if not posted:
+            failed += 1
+
+    # A chunk that never landed is a piece of the reply the user will never
+    # see. Returning the id of a sibling chunk reports the whole message as
+    # delivered and the loss goes unnoticed — which is how two replies
+    # vanished silently before this was caught.
+    if failed:
+        log.error(
+            f"post_to_discord: {failed} of {len(chunks)} chunk(s) failed for "
+            f"{agent} in {channel_id}; message is incomplete"
+        )
+        return None
 
     return last_msg_id
 
