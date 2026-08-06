@@ -1,0 +1,34 @@
+name: Bug or enhancement
+description: File a defect or work item against karakos-package.
+labels: []
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What's wrong, or what's missing. Include what today's behavior is.
+      placeholder: |
+        The agent says it has no such tool. skills/*/tools.json is unreachable because...
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance-test
+    attributes:
+      label: Install-visible acceptance test
+      description: >-
+        Phrase this as a user action followed by an observable outcome — something
+        a person can do on a fresh install and see pass or fail, not a description
+        of the internals. An issue without one is incomplete before anyone reads
+        the body.
+      placeholder: |
+        Fresh install per docs/QUICKSTART.md. In Discord: "use the hello_world tool."
+        Pass = the agent returns the greeting from skills/examples/hello-world/.
+    validations:
+      required: true
+  - type: textarea
+    id: fix-shape
+    attributes:
+      label: Fix shape (optional)
+      description: If you already know the likely fix, sketch it here.
+    validations:
+      required: false

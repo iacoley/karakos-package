@@ -6,3 +6,4 @@ fastembed==0.3.6
 schedule==1.2.2
 prompt-toolkit==3.0.48
 rich==13.9.4
+PyYAML==6.0.2
