@@ -37,7 +37,11 @@ Or: In Discord, enable Developer Mode (Settings → Advanced → Developer Mode)
 1. Go to **OAuth2 → URL Generator** in the developer portal
 2. Select scopes:
    - `bot`
-   - `applications.commands` (optional, for future slash commands)
+   - `applications.commands` (**required** — Karakos registers slash
+     commands on startup; without this scope registration returns 403,
+     and the only fix is to redo this invite step. Adding the scope
+     later requires a human with Manage Server to re-authorise the bot
+     through this same URL generator, so check it now.)
 3. Select bot permissions:
    - Read Messages/View Channels
    - Send Messages
@@ -100,6 +104,15 @@ Without multi-bot setup, all agents post through the primary bot.
 **"Missing Access" error:**
 - The bot isn't in the server or doesn't have channel permissions
 - Re-invite using the URL generator with correct permissions
+
+**Slash commands don't show up when you type `/`:**
+- Registration runs automatically on container start
+  (`bin/register-discord-commands.py`, via `bin/entrypoint.sh`) and logs a
+  `WARNING` on failure — check `docker compose logs`
+- A 403 in that log means the bot was invited without the
+  `applications.commands` scope. Re-invite it through **OAuth2 → URL
+  Generator** with that scope checked (step 4 above) — a token or
+  permission change alone will not fix it
 
 **Rate limited:**
 - Discord rate limits are handled automatically with exponential backoff

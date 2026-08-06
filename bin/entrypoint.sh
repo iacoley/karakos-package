@@ -86,4 +86,17 @@ if [ -f "$WORKSPACE_ROOT/system/check-protected-paths.py" ]; then
     chmod +x "$WORKSPACE_ROOT/.git/hooks/pre-commit" 2>/dev/null || true
 fi
 
+# Register Discord slash commands so they show up in the guild's "/" picker
+# with no extra script to run and no documented follow-up step. Guild-scoped
+# (immediate) rather than global, and safe to re-run on every start -- the
+# registration call replaces the whole command set, so an unchanged list is
+# a no-op. Never blocks startup: a failure here (most commonly a 403,
+# meaning the bot was invited without the applications.commands scope) needs
+# a human with Manage Server to re-invite it, not anything this container
+# can fix on its own -- see docs/DISCORD_SETUP.md.
+if [ -n "${DISCORD_BOT_TOKEN_PRIMARY:-}" ] && [ -n "${DISCORD_BOT_ID_PRIMARY:-}" ] && [ -n "${DISCORD_SERVER_ID:-}" ]; then
+    python3 "$WORKSPACE_ROOT/bin/register-discord-commands.py" || \
+        echo "WARNING: Discord slash-command registration failed (see above). The bot will still start." >&2
+fi
+
 exec supervisord -c "$WORKSPACE_ROOT/config/supervisord.conf"
