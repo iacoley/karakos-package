@@ -1,0 +1,12 @@
+This file is a placeholder example, not a live recall source.
+
+Copy it to config/recall-source (or point KARAKOS_RECALL_SOURCE at a copy
+elsewhere) and edit it directly to give every UserPromptSubmit turn a
+static block of standing facts — see docs/EXTENDING.md, "Recall
+re-injection", for the full interface (a plain file is read verbatim; an
+executable file instead receives the pending prompt on stdin and its
+stdout becomes the recall block).
+
+config/recall-source does not exist by default, and inject-recall.py
+treats that as a no-op — this example ships inert until an operator acts
+on it.

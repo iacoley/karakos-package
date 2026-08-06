@@ -81,6 +81,14 @@ log.addHandler(console)
 # Regex patterns
 THINKING_BLOCK_RE = re.compile(r"<thinking>(.*?)</thinking>", re.DOTALL)
 
+# Prefix stamped onto the prompt text sent to the subprocess when every
+# message in a batch is automated (is_bot=1 — system pokes, heartbeats,
+# task-complete notifications from bin/poke.sh, never a human via
+# bin/relay.py). system/hooks/inject-recall.py (#98) reads this same
+# literal string as its skip gate, since the hook only ever sees the final
+# prompt text over stdin, not the message_queue row's is_bot column.
+AUTOMATED_TRAFFIC_SENTINEL = "[KARAKOS_AUTOMATED]"
+
 # =============================================================================
 # Global State
 # =============================================================================
@@ -218,6 +226,25 @@ async def load_config():
                     bot_id = os.environ.get(bot_id_env)
                     if bot_id:
                         DISCORD_ID_TO_AGENT[int(bot_id)] = agent_name
+
+
+def load_permission_policy() -> tuple[list, list]:
+    """Read permissions.allow / permissions.deny out of the shared claude
+    settings file, for logging only — the CLI itself is what actually
+    enforces the policy once --settings is on the spawn line. Missing file,
+    missing "permissions" key, or a parse error all resolve to ([], []),
+    the no-op default (#99: "An empty recall source must be a no-op" is
+    #98's rule, but the same posture applies here — absence of policy is
+    not an error)."""
+    if not CLAUDE_SETTINGS_PATH.exists():
+        return [], []
+    try:
+        settings = json.loads(CLAUDE_SETTINGS_PATH.read_text())
+    except (OSError, json.JSONDecodeError) as e:
+        log.warning(f"Could not parse {CLAUDE_SETTINGS_PATH} for permission policy: {e}")
+        return [], []
+    permissions = settings.get("permissions") or {}
+    return permissions.get("allow") or [], permissions.get("deny") or []
 
 # =============================================================================
 # Session Management
@@ -396,8 +423,19 @@ async def start_agent_subprocess(agent: str):
     # Package-owned hook wiring (PreToolUse/PostToolUse/UserPromptSubmit/Stop/
     # SessionStart etc.) lives in this settings file rather than a `.claude/`
     # dir the installer would have to scaffold and the user could delete.
+    # It also carries permissions.allow/permissions.deny (#99) — a reviewable,
+    # version-controlled tool policy instead of ad hoc CLI flags. Note that
+    # --dangerously-skip-permissions below does NOT override a deny rule: a
+    # fully-denied tool is dropped from the session's tool list at spawn
+    # (verified against the real CLI — see tests/test_permissions_policy.py),
+    # and skip-permissions only removes the interactive-approval step for
+    # tools that aren't denied. allow/deny apply to every agent that shares
+    # this file; there is currently no per-agent settings file.
     if CLAUDE_SETTINGS_PATH.exists():
         cmd.extend(["--settings", str(CLAUDE_SETTINGS_PATH)])
+        allow_list, deny_list = load_permission_policy()
+        if allow_list or deny_list:
+            log.info(f"{agent} permission policy: allow={allow_list} deny={deny_list}")
     else:
         log.warning(f"No settings file at {CLAUDE_SETTINGS_PATH}; starting {agent} with hooks unwired")
 
@@ -414,6 +452,16 @@ async def start_agent_subprocess(agent: str):
     if allowed:
         cmd.extend(["--allowedTools", ",".join(allowed)])
 
+    # Per-agent environment (#99) — agents.json's `env` dict is layered onto
+    # the server's own environment rather than replacing it, so the agent
+    # still inherits API keys, WORKSPACE_ROOT, etc. Per-agent entries win on
+    # collision, which is the point: an operator scoping one agent to a
+    # different API base URL or timeout without touching every other agent.
+    env_overrides = config.get("env") or {}
+    spawn_env = {**os.environ, **env_overrides} if env_overrides else None
+    if env_overrides:
+        log.info(f"{agent} env overrides: {sorted(env_overrides.keys())}")
+
     log.info(f"Starting {agent} subprocess (model={config.get('model')}, session={session_id[:8]})")
 
     # Cancel any stderr reader left over from a prior subprocess for this
@@ -427,7 +475,8 @@ async def start_agent_subprocess(agent: str):
             *cmd,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
+            stderr=asyncio.subprocess.PIPE,
+            env=spawn_env,
         )
         agent_processes[agent] = proc
         agent_states[agent] = "IDLE"
@@ -768,6 +817,12 @@ async def write_streaming_response(message_ids: List[str], text: str) -> None:
         log.warning(f"streaming response write failed: {e}")
 
 
+def extract_permission_denials(result_event: Dict) -> List[Dict]:
+    """Pull the `permission_denials` list off a stream-json `result` event.
+    Always a list, never None, so callers can iterate unconditionally."""
+    return result_event.get("permission_denials") or []
+
+
 async def read_agent_response(
     agent: str, channel_id: str, message_ids: Optional[List[str]] = None
 ) -> tuple[str, Dict]:
@@ -797,6 +852,17 @@ async def read_agent_response(
                 continue
 
             event_type = event.get("type")
+
+            # One `system`/`init` event opens the stream, listing the tool
+            # set the CLI actually resolved for this session. A tool named
+            # in permissions.deny (#99) is dropped from this list entirely
+            # rather than surfacing as a runtime denial — logging it here is
+            # the only place a full-tool deny is ever visible after the
+            # fact.
+            if event_type == "system" and event.get("subtype") == "init":
+                tools = event.get("tools")
+                if tools is not None:
+                    log.info(f"{agent} session tools ({len(tools)}): {tools}")
 
             # Claude Code stream-json output: each turn emits one or more
             # `assistant` events with content blocks (thinking/text/tool_use),
@@ -845,6 +911,19 @@ async def read_agent_response(
                 # the result's flat `result` string (success) or `error`.
                 if not final_text:
                     final_text = event.get("result", "") or event.get("error", "")
+
+                # A fine-grained deny rule (e.g. "Bash(curl:*)") lets the
+                # tool stay in the session's list but declines the specific
+                # call at request time — that shows up here, not in the
+                # init event's tool list. Each denial is the acceptance
+                # test's "logged" half; #99.
+                denials = extract_permission_denials(event)
+                metadata["permission_denials"] = denials
+                for denial in denials:
+                    log.warning(
+                        f"{agent} permission denied: tool={denial.get('tool_name')} "
+                        f"input={denial.get('tool_input')}"
+                    )
                 break
 
     except Exception as e:
@@ -903,6 +982,14 @@ async def process_agent_queue(agent: str):
             formatted_parts.append(f"[{timestamp}] {author}: {content}")
 
         formatted_content = "\n\n".join(formatted_parts)
+
+        # Stamp the automated-traffic sentinel when every message in the
+        # batch is bot-originated (poke.sh always sets is_bot=1 for system
+        # pokes, heartbeats, and task-complete notifications). A batch with
+        # even one human Discord message stays unmarked, so a human reply
+        # riding along in the same batch still gets a fresh recall block.
+        if all(msg["is_bot"] for msg in messages):
+            formatted_content = f"{AUTOMATED_TRAFFIC_SENTINEL}\n{formatted_content}"
 
         # Start typing indicator
         await start_typing(agent, channel_id)
