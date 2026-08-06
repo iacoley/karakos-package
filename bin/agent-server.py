@@ -36,6 +36,7 @@ PORT = int(os.environ.get("AGENT_SERVER_PORT", "18791"))
 DB_PATH = WORKSPACE_ROOT / "data" / "memory" / "agent-server.db"
 AGENTS_CONFIG_PATH = WORKSPACE_ROOT / "config" / "agents.json"
 CHANNELS_CONFIG_PATH = WORKSPACE_ROOT / "config" / "channels.json"
+CLAUDE_SETTINGS_PATH = WORKSPACE_ROOT / "config" / "claude-settings.json"
 STREAM_LOG_DIR = WORKSPACE_ROOT / "logs" / "agent-streams"
 AGENT_SERVER_TOKEN = os.environ.get("AGENT_SERVER_TOKEN", "")
 OWNER_DISCORD_ID = os.environ.get("OWNER_DISCORD_ID", "0")
@@ -391,6 +392,14 @@ async def start_agent_subprocess(agent: str):
         "--session-id", session_id,
         "--system-prompt", system_prompt_text,
     ]
+
+    # Package-owned hook wiring (PreToolUse/PostToolUse/UserPromptSubmit/Stop/
+    # SessionStart etc.) lives in this settings file rather than a `.claude/`
+    # dir the installer would have to scaffold and the user could delete.
+    if CLAUDE_SETTINGS_PATH.exists():
+        cmd.extend(["--settings", str(CLAUDE_SETTINGS_PATH)])
+    else:
+        log.warning(f"No settings file at {CLAUDE_SETTINGS_PATH}; starting {agent} with hooks unwired")
 
     if persona_content:
         cmd.extend(["--append-system-prompt", persona_content])
