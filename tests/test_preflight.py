@@ -680,3 +680,97 @@ class TestAnchoring:
         fail_checks_in_output = "required_env_vars" in result.stdout and "✗" in result.stdout
         # If anchoring works, required_env_vars passes
         assert "✓ required_env_vars" in result.stdout
+
+
+# =============================================================================
+# --verify-gates
+#
+# Issue #107: nothing checked that a safety gate can still fire after
+# preflight passes. Acceptance test: deliberately disable one gate, then run
+# the verifier — it must exit non-zero and name the disabled gate.
+# =============================================================================
+
+class TestVerifyGates:
+    GATE_NAMES = [
+        "docker_engine_reachable",
+        "docker_compose_v2",
+        "wsl_integration_healthy",
+        "architecture_supported",
+        "shell_script_line_endings",
+        "required_env_vars",
+        "port_available",
+        "disk_space",
+    ]
+
+    def test_all_gates_fail_under_their_own_negative_control(self, tmp_path):
+        """
+        On the real, unmodified script, every gate must still be able to
+        report fail — --verify-gates builds its own fixtures internally, so
+        the outer mock_bin/env here only need to satisfy the top-level cd and
+        argument parsing, not the gates themselves.
+        """
+        mock = make_full_mock_bin(tmp_path)
+        result = run(tmp_path, mock, args=["--verify-gates"])
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "verify-gates: PASS" in result.stdout
+        assert "BROKEN" not in result.stdout
+        for name in self.GATE_NAMES:
+            assert f"{name} — fails under its negative control" in result.stdout
+
+    def test_disabled_gate_is_named_and_exits_nonzero(self, tmp_path):
+        """
+        The issue's acceptance test: deliberately disable one gate (the
+        household's actual historical bug — a check hardcoded to always
+        report pass) and confirm --verify-gates catches it, names it, and
+        exits non-zero, without losing coverage of the other gates.
+        """
+        original = PREFLIGHT.read_text()
+        needle = (
+            'timeout 10 docker info >/dev/null 2>&1\n'
+            '    local rc=$?\n'
+            '    if [ "$rc" -eq 0 ]; then\n'
+            '        _pass "docker_engine_reachable"'
+        )
+        replacement = needle.replace('if [ "$rc" -eq 0 ]; then', 'if true; then')
+        assert needle in original, "fixture point moved — update this test"
+        assert replacement != original
+
+        broken = tmp_path / "preflight-broken.sh"
+        broken.write_text(original.replace(needle, replacement, 1))
+        broken.chmod(0o755)
+
+        repo_root = tmp_path / "repo"
+        (repo_root / "config").mkdir(parents=True)
+        (repo_root / "bin").mkdir()
+        (repo_root / "config" / ".env").write_text(VALID_ENV)
+        (repo_root / "bin" / "entrypoint.sh").write_text("#!/bin/bash\necho hello\n")
+
+        env = os.environ.copy()
+        env.pop("WSL_DISTRO_NAME", None)
+        env["PREFLIGHT_REPO_ROOT"] = str(repo_root)
+
+        result = subprocess.run(
+            ["bash", str(broken), "--verify-gates"],
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=str(PACKAGE_ROOT),
+            timeout=60,
+        )
+        combined = result.stdout + result.stderr
+        assert result.returncode != 0
+        assert "verify-gates: FAIL" in combined
+        assert "BROKEN" in combined
+        assert "docker_engine_reachable" in combined
+        # The other seven gates are untouched and must still prove they can fire.
+        for name in self.GATE_NAMES:
+            if name == "docker_engine_reachable":
+                continue
+            assert f"{name} — fails under its negative control" in result.stdout
+
+    def test_normal_mode_unaffected_by_verify_gates_machinery(self, tmp_path):
+        """Running without --verify-gates never mentions it."""
+        mock = make_full_mock_bin(tmp_path)
+        result = run(tmp_path, mock)
+        assert result.returncode == 0
+        assert "verify-gates" not in result.stdout

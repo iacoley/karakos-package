@@ -3,9 +3,16 @@
 #
 # Usage:
 #   ./bin/preflight.sh [--json] [--quiet]
+#   ./bin/preflight.sh --verify-gates
 #
 # Exits 0 if all checks pass (warnings do not affect the exit code).
 # Exits 1 if any check fails.
+#
+# --verify-gates runs a negative control against every check above instead of
+# checking the host: it feeds each one a fixture built to make it fail, then
+# asserts it actually reported fail. A check that reports pass under a fixture
+# built to break it cannot fire — see the "Gate verification" section below.
+# Exits non-zero and names any gate that cannot fire.
 #
 # See docs/QUICKSTART.md and Makefile for integration into the install path.
 
@@ -19,6 +26,7 @@ set -uo pipefail
 # =============================================================================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${PREFLIGHT_REPO_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
+PREFLIGHT_SELF="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
 cd "$REPO_ROOT"
 
 # =============================================================================
@@ -26,11 +34,13 @@ cd "$REPO_ROOT"
 # =============================================================================
 JSON_MODE=false
 QUIET_MODE=false
+VERIFY_GATES_MODE=false
 
 for _arg in "$@"; do
     case "$_arg" in
-        --json)  JSON_MODE=true  ;;
-        --quiet) QUIET_MODE=true ;;
+        --json)          JSON_MODE=true         ;;
+        --quiet)         QUIET_MODE=true         ;;
+        --verify-gates)  VERIFY_GATES_MODE=true  ;;
     esac
 done
 
@@ -405,8 +415,161 @@ _check_disk_space() {
 }
 
 # =============================================================================
+# Library mode — internal to --verify-gates. Sourcing this file with
+# PREFLIGHT_SOURCE_ONLY=true defines every function above and stops here,
+# without running the suite or exiting the caller's shell. That lets
+# _run_verify_gates source a fresh copy of this exact script inside a mocked
+# subshell and invoke one check function in isolation.
+# =============================================================================
+if [ "${PREFLIGHT_SOURCE_ONLY:-false}" = true ]; then
+    return 0 2>/dev/null || exit 0
+fi
+
+# =============================================================================
+# Gate verification (--verify-gates)
+#
+# The failure mode this guards against has history: household's
+# bin/system-check.sh check 3 was a hardcoded pass for four months because it
+# kept reporting "fine" without ever running the real logic. A check here is
+# only a gate if it can still report fail — so for each one, build a fixture
+# known to break it (a stubbed docker/uname/file/ss/df, or a bad repo root),
+# source a fresh copy of this script with PREFLIGHT_SOURCE_ONLY=true against
+# that fixture, and call the single check function directly. If it reports
+# pass anyway, it cannot fire, and that gate's name is reported.
+# =============================================================================
+declare -a _VERIFY_TMPDIRS=()
+
+_verify_mkmock() {
+    # _verify_mkmock <command-name> <script-body> — writes an executable mock
+    # into a fresh temp dir and prints that dir's path.
+    local cmd_name="$1" body="$2" dir
+    dir="$(mktemp -d)"
+    _VERIFY_TMPDIRS+=("$dir")
+    printf '%s\n' "$body" > "$dir/$cmd_name"
+    chmod +x "$dir/$cmd_name"
+    printf '%s' "$dir"
+}
+
+_verify_mkroot() {
+    # _verify_mkroot — fresh temp PREFLIGHT_REPO_ROOT with a bin/ dir, printed.
+    local dir
+    dir="$(mktemp -d)"
+    _VERIFY_TMPDIRS+=("$dir")
+    mkdir -p "$dir/bin" "$dir/config"
+    printf '%s' "$dir"
+}
+
+# _verify_gate <gate-name> <bash-snippet-to-run> <extra env assignment>...
+# The snippet runs after this script is re-sourced, so it may reference any
+# _check_* function directly (and set state like _PARSED_DASHBOARD_PORT first,
+# for checks that depend on an earlier check having run).
+_verify_gate() {
+    local name="$1" snippet="$2"
+    shift 2
+    local out
+    out="$(env PREFLIGHT_SOURCE_ONLY=true "$@" bash -c "source '$PREFLIGHT_SELF'; $snippet" 2>&1)"
+    if printf '%s\n' "$out" | grep -qF "✗ ${name}:"; then
+        printf '  ok      %s — fails under its negative control\n' "$name"
+        return 0
+    fi
+    printf '  BROKEN  %s — did not report fail under a fixture built to break it\n' "$name" >&2
+    printf '%s\n' "$out" | sed 's/^/          | /' >&2
+    return 1
+}
+
+_run_verify_gates() {
+    trap '[ "${#_VERIFY_TMPDIRS[@]}" -eq 0 ] || rm -rf "${_VERIFY_TMPDIRS[@]}"' RETURN
+
+    local mock_docker_down mock_compose_down mock_docker_wsl_down mock_uname_bad
+    local mock_file_crlf mock_ss_busy mock_docker_disk_ok mock_df_low root_missing_env root_crlf
+
+    mock_docker_down="$(_verify_mkmock docker '#!/bin/sh
+exit 1')"
+
+    mock_compose_down="$(_verify_mkmock docker '#!/bin/sh
+if [ "$1" = "info" ]; then echo "Docker Root Dir: /tmp"; exit 0; fi
+if [ "$1" = "compose" ]; then exit 1; fi
+exit 0')"
+
+    mock_docker_wsl_down="$(_verify_mkmock docker '#!/bin/sh
+if [ "$1" = "info" ]; then echo "Permission denied"; exit 1; fi
+exit 0')"
+
+    mock_uname_bad="$(_verify_mkmock uname '#!/bin/sh
+if [ "$1" = "-m" ]; then echo "riscv64"; else exit 1; fi')"
+
+    mock_file_crlf="$(_verify_mkmock file '#!/bin/sh
+echo "$1: Bourne-Again shell script, ASCII text executable, with CRLF line terminators"')"
+
+    mock_ss_busy="$(_verify_mkmock ss '#!/bin/sh
+echo "Netid State Recv-Q Send-Q Local Address:Port Peer Address:Port"
+echo "tcp   LISTEN 0      128   0.0.0.0:59999 0.0.0.0:*"')"
+
+    mock_docker_disk_ok="$(_verify_mkmock docker '#!/bin/sh
+if [ "$1" = "info" ]; then echo "Docker Root Dir: /tmp"; exit 0; fi
+exit 0')"
+
+    mock_df_low="$(_verify_mkmock df '#!/bin/sh
+echo "Filesystem      1G-blocks  Used Available Use% Mounted on"
+echo "/dev/sda1             100    50        3G  50% /"')"
+
+    root_missing_env="$(_verify_mkroot)"
+    root_crlf="$(_verify_mkroot)"
+    printf '#!/bin/bash\necho hello\n' > "$root_crlf/bin/fake.sh"
+
+    printf 'verify-gates: negative-control run\n'
+
+    local failed=0
+
+    _verify_gate "docker_engine_reachable" \
+        "_check_docker_engine_reachable" \
+        "PATH=${mock_docker_down}:$PATH" || failed=$((failed + 1))
+
+    _verify_gate "docker_compose_v2" \
+        "_check_docker_compose_v2" \
+        "PATH=${mock_compose_down}:$PATH" || failed=$((failed + 1))
+
+    _verify_gate "wsl_integration_healthy" \
+        "_check_wsl_integration_healthy" \
+        "PATH=${mock_docker_wsl_down}:$PATH" "WSL_DISTRO_NAME=verify-gates-fixture" || failed=$((failed + 1))
+
+    _verify_gate "architecture_supported" \
+        "_check_architecture_supported" \
+        "PATH=${mock_uname_bad}:$PATH" || failed=$((failed + 1))
+
+    _verify_gate "shell_script_line_endings" \
+        "_check_shell_script_line_endings" \
+        "PATH=${mock_file_crlf}:$PATH" "PREFLIGHT_REPO_ROOT=${root_crlf}" || failed=$((failed + 1))
+
+    _verify_gate "required_env_vars" \
+        "_check_required_env_vars" \
+        "PREFLIGHT_REPO_ROOT=${root_missing_env}" || failed=$((failed + 1))
+
+    _verify_gate "port_available" \
+        "_PARSED_DASHBOARD_PORT=59999; _check_port_available" \
+        "PATH=${mock_ss_busy}:$PATH" || failed=$((failed + 1))
+
+    _verify_gate "disk_space" \
+        "_check_disk_space" \
+        "PATH=${mock_docker_disk_ok}:${mock_df_low}:$PATH" || failed=$((failed + 1))
+
+    printf '\n'
+    if [ "$failed" -eq 0 ]; then
+        printf '%sverify-gates: PASS — every gate fails under its negative control%s\n' "$C_GREEN" "$C_RESET"
+        return 0
+    fi
+    printf '%sverify-gates: FAIL — %d gate(s) cannot fire%s\n' "$C_RED" "$failed" "$C_RESET"
+    return 1
+}
+
+# =============================================================================
 # Run all checks unconditionally
 # =============================================================================
+if [ "$VERIFY_GATES_MODE" = true ]; then
+    _run_verify_gates
+    exit $?
+fi
+
 _check_docker_engine_reachable
 _check_docker_compose_v2
 _check_wsl_integration_healthy
