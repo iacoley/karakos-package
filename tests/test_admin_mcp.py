@@ -107,8 +107,18 @@ def test_parse_error():
 
 
 def test_mcp_config_at_repo_root():
-    """Spec requires .mcp.json at repo root so spawned claude subprocesses pick it up."""
+    """Spec requires .mcp.json at repo root so spawned claude subprocesses pick it up.
+
+    system-tools must live here too (issue #83) — Claude Code only reads
+    .mcp.json from the project root, never mcp/.mcp.json, so a second config
+    file anywhere else is invisible to the agent.
+    """
     cfg = PACKAGE_ROOT / ".mcp.json"
     assert cfg.exists(), ".mcp.json must exist at repo root"
     data = json.loads(cfg.read_text())
     assert "karakos-admin" in data["mcpServers"]
+    assert "system-tools" in data["mcpServers"]
+    assert not (PACKAGE_ROOT / "mcp" / ".mcp.json").exists(), (
+        "mcp/.mcp.json is dead config Claude Code never reads; keeping it "
+        "invites re-registering a server there instead of at the root"
+    )

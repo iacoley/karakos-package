@@ -214,7 +214,14 @@ def write_health():
 # =============================================================================
 
 def discover_skills() -> list[dict]:
-    """Scan skills/*/tools.json for tool definitions."""
+    """Scan skills/*/tools.json for tool definitions.
+
+    This package's skill convention is tools.json + scripts/ (see
+    docs/EXTENDING.md). A skill directory that ships only a frontmatter-style
+    SKILL.md (the Anthropic Agent Skills convention) has no tools.json for
+    this server to read, so it is skipped — but skipped loudly, on stderr,
+    naming the file, per issue #84.
+    """
     tools = []
     if not SKILLS_DIR.exists():
         return tools
@@ -224,6 +231,14 @@ def discover_skills() -> list[dict]:
             continue
         tools_file = skill_dir / "tools.json"
         if not tools_file.exists():
+            skill_md = skill_dir / "SKILL.md"
+            if skill_md.exists():
+                sys.stderr.write(
+                    f"Skipping {skill_md}: no tools.json in {skill_dir}. "
+                    "This server only loads the tools.json + scripts/ skill "
+                    "convention (docs/EXTENDING.md); frontmatter-only "
+                    "SKILL.md files are not discovered.\n"
+                )
             continue
         try:
             data = json.loads(tools_file.read_text())

@@ -709,7 +709,7 @@ def save_state(state):
 
 ## Next Steps
 
-- Explore `skills/examples/` for more examples
+- Explore `skills/hello-world/` for a complete working example
 - Read the [MCP Protocol Spec](https://spec.modelcontextprotocol.io/) for advanced features
 - Check the [Karakos Architecture](../docs/ARCHITECTURE.md) to understand how skills integrate
 

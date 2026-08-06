@@ -54,7 +54,7 @@ Skills add new tools to the MCP server. They're automatically discovered at star
 ### 1. Create the Skill Directory
 
 ```bash
-cp -r skills/examples/hello-world skills/my-skill
+cp -r skills/hello-world skills/my-skill
 ```
 
 ### 2. Define Tools
