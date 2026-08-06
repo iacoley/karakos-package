@@ -94,6 +94,7 @@ agent_states: Dict[str, str] = {}
 response_buffers: Dict[str, str] = {}
 agent_last_cost: Dict[str, float] = {}
 agent_sessions: Dict[str, str] = {}
+stderr_reader_tasks: Dict[str, asyncio.Task] = {}
 typing_tasks: Dict[str, asyncio.Task] = {}
 agent_todo_lists: Dict[str, List[Dict]] = {}
 active_todo_messages: Dict[str, Dict] = {}
@@ -406,6 +407,12 @@ async def start_agent_subprocess(agent: str):
 
     log.info(f"Starting {agent} subprocess (model={config.get('model')}, session={session_id[:8]})")
 
+    # Cancel any stderr reader left over from a prior subprocess for this
+    # agent before spawning a new one — otherwise it leaks on every respawn.
+    stale_reader = stderr_reader_tasks.pop(agent, None)
+    if stale_reader and not stale_reader.done():
+        stale_reader.cancel()
+
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -417,8 +424,8 @@ async def start_agent_subprocess(agent: str):
         agent_states[agent] = "IDLE"
         agent_sessions[agent] = session_id
 
-        # Start stderr reader
-        asyncio.create_task(stderr_reader(agent, proc))
+        # Start stderr reader, tracked so it can be cancelled on kill/respawn.
+        stderr_reader_tasks[agent] = asyncio.create_task(stderr_reader(agent, proc))
 
         log.info(f"{agent} subprocess started (PID {proc.pid})")
     except Exception as e:
@@ -454,6 +461,11 @@ async def kill_agent_subprocess(agent: str):
         await proc.wait()
 
     agent_processes.pop(agent, None)
+
+    reader_task = stderr_reader_tasks.pop(agent, None)
+    if reader_task and not reader_task.done():
+        reader_task.cancel()
+
     log.info(f"{agent} subprocess terminated")
 
 async def restart_agent(agent: str):
