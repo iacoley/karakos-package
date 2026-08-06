@@ -10,6 +10,36 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$WORKSPACE_ROOT/system/hooks/resolve-symlink-edit.py"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$WORKSPACE_ROOT/system/hooks/rewrite-sleep-poll.py"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$WORKSPACE_ROOT/system/hooks/stop-deferred-work.py"
+          }
+        ]
+      }
     ]
   }
 }
