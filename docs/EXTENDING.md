@@ -51,6 +51,14 @@ Never discuss politics or religion. Redirect to practical topics.
 
 Skills add new tools to the MCP server. They're automatically discovered at startup.
 
+**This is not Claude Code's built-in Agent Skills feature.** Claude Code has
+its own native skill system: a `SKILL.md` file with YAML frontmatter,
+auto-discovered from `.claude/skills/`. Karakos "skills" are a separate,
+package-specific convention — a `tools.json` schema plus a `scripts/`
+implementation, discovered by `mcp/tools-server.py` and exposed as MCP
+tools. A frontmatter-only `SKILL.md` dropped under `skills/` will not load
+here; it needs `tools.json` and `scripts/` as shown below.
+
 ### 1. Create the Skill Directory
 
 ```bash
