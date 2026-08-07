@@ -38,8 +38,15 @@ AGENTS_CONFIG_PATH = WORKSPACE_ROOT / "config" / "agents.json"
 CHANNELS_CONFIG_PATH = WORKSPACE_ROOT / "config" / "channels.json"
 CLAUDE_SETTINGS_PATH = WORKSPACE_ROOT / "config" / "claude-settings.json"
 STREAM_LOG_DIR = WORKSPACE_ROOT / "logs" / "agent-streams"
+DEAD_LETTER_PATH = WORKSPACE_ROOT / "data" / "discord-dead-letter.jsonl"
 AGENT_SERVER_TOKEN = os.environ.get("AGENT_SERVER_TOKEN", "")
 OWNER_DISCORD_ID = os.environ.get("OWNER_DISCORD_ID", "0")
+
+# Attempts per chunk before a reply is dead-lettered. Applies to failures that
+# might clear on their own (5xx, network); a 403 is not one of those and is
+# dead-lettered on the first try — see post_to_discord.
+POST_MAX_ATTEMPTS = int(os.environ.get("DISCORD_POST_MAX_ATTEMPTS", "3"))
+POST_RETRY_BASE_SEC = float(os.environ.get("DISCORD_POST_RETRY_BASE_SEC", "1.0"))
 
 # Cost limits
 COST_DAILY_LIMIT = float(os.environ.get("COST_DAILY_LIMIT", "25.00"))
@@ -652,8 +659,61 @@ def split_discord_message(text: str, max_length: int = MAX_DISCORD_MSG_LEN) -> L
         chunks.append(remaining)
 
     return chunks if chunks else [text]
-async def post_to_discord(agent: str, channel_id: str, content: str, reply_to: Optional[str] = None) -> Optional[str]:
-    """Post message to Discord as agent, splitting if over 2000 chars"""
+def _write_dead_letter(agent: str, channel_id: str, content: str, reason: str,
+                       attempts: int) -> None:
+    """Record a reply that was generated but could not be delivered.
+
+    The agent ran, the tokens were spent, the answer exists — and without this
+    the only trace is a log line. Writing it somewhere durable is what makes it
+    recoverable, and what lets /health say the delivery path is broken instead
+    of everything looking idle and fine.
+
+    Never raises: this is the error path, and a failure to record a failure
+    must not take down the response loop on top of it.
+    """
+    try:
+        DEAD_LETTER_PATH.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "agent": agent,
+            "channel_id": channel_id,
+            "reason": reason,
+            "attempts": attempts,
+            "content": content,
+        }
+        with open(DEAD_LETTER_PATH, "a") as f:
+            f.write(json.dumps(record) + "\n")
+        log.error(
+            f"DEAD LETTER: {agent}'s reply for channel {channel_id} "
+            f"({len(content)} chars) undelivered after {attempts} attempt(s): "
+            f"{reason}. Written to {DEAD_LETTER_PATH}"
+        )
+    except Exception as e:
+        log.error(f"Failed to write dead letter (reply is now lost): {e}")
+
+
+def dead_letter_count() -> int:
+    """How many replies are sitting undelivered. 0 if the file is absent."""
+    try:
+        if not DEAD_LETTER_PATH.exists():
+            return 0
+        with open(DEAD_LETTER_PATH) as f:
+            return sum(1 for line in f if line.strip())
+    except Exception as e:
+        log.error(f"Could not count dead letters: {e}")
+        return 0
+
+
+async def post_to_discord(agent: str, channel_id: str, content: str,
+                          reply_to: Optional[str] = None,
+                          dead_letter: bool = False) -> Optional[str]:
+    """Post message to Discord as agent, splitting if over 2000 chars.
+
+    `dead_letter=True` marks this content as agent output worth preserving if
+    delivery fails — a reply someone is waiting on. It is off by default so
+    that incidentals (tool-event lines, cost updates, the crash notice) do not
+    fill the queue with things nobody would replay.
+    """
     global http_session
 
     # Skip posting if channel_id is "0" (silent mode)
@@ -680,6 +740,8 @@ async def post_to_discord(agent: str, channel_id: str, content: str, reply_to: O
     chunks = split_discord_message(content)
     last_msg_id = None
     failed = 0
+    attempts_used = 0
+    last_reason = "unknown"
 
     for idx, chunk in enumerate(chunks):
         payload = {"content": chunk}
@@ -688,37 +750,55 @@ async def post_to_discord(agent: str, channel_id: str, content: str, reply_to: O
             payload["message_reference"] = {"message_id": reply_to}
 
         posted = False
-        try:
-            async with http_session.post(url, headers=headers, json=payload) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    last_msg_id = data.get("id")
-                    posted = True
-                elif resp.status == 429:
-                    retry_after = (await resp.json()).get("retry_after", 1)
-                    log.warning(f"Rate limited posting to {channel_id}, retry after {retry_after}s")
-                    await asyncio.sleep(retry_after)
-                    # Retry this chunk
-                    async with http_session.post(url, headers=headers, json=payload) as retry_resp:
-                        if retry_resp.status == 200:
-                            data = await retry_resp.json()
-                            last_msg_id = data.get("id")
-                            posted = True
-                        else:
-                            log.error(
-                                f"Discord API error {retry_resp.status} on chunk "
-                                f"{idx + 1}/{len(chunks)} ({len(chunk)} chars) after "
-                                f"rate-limit retry: {await retry_resp.text()}"
-                            )
-                else:
-                    log.error(
-                        f"Discord API error {resp.status} on chunk "
-                        f"{idx + 1}/{len(chunks)} ({len(chunk)} chars): "
-                        f"{await resp.text()}"
-                    )
-        except Exception as e:
-            log.error(f"Error posting chunk {idx + 1}/{len(chunks)} to Discord: {e}")
+        attempt = 0
+        while attempt < POST_MAX_ATTEMPTS and not posted:
+            attempt += 1
+            try:
+                async with http_session.post(url, headers=headers, json=payload) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        last_msg_id = data.get("id")
+                        posted = True
+                    elif resp.status == 429:
+                        retry_after = (await resp.json()).get("retry_after", 1)
+                        log.warning(
+                            f"Rate limited posting to {channel_id}, retry after {retry_after}s "
+                            f"(attempt {attempt}/{POST_MAX_ATTEMPTS})"
+                        )
+                        last_reason = "rate limited"
+                        await asyncio.sleep(retry_after)
+                    elif resp.status in (401, 403, 404):
+                        # Permission revoked, token rejected, channel gone. None
+                        # of these clear by trying again — retrying only delays
+                        # the moment the reply is recorded as undeliverable.
+                        body = (await resp.text())[:200]
+                        last_reason = f"HTTP {resp.status} ({body})"
+                        log.error(
+                            f"Discord API error {resp.status} on chunk "
+                            f"{idx + 1}/{len(chunks)} ({len(chunk)} chars); "
+                            f"not retryable"
+                        )
+                        break
+                    else:
+                        last_reason = f"HTTP {resp.status}"
+                        log.error(
+                            f"Discord API error {resp.status} on chunk "
+                            f"{idx + 1}/{len(chunks)} ({len(chunk)} chars) "
+                            f"(attempt {attempt}/{POST_MAX_ATTEMPTS}): "
+                            f"{await resp.text()}"
+                        )
+                        if attempt < POST_MAX_ATTEMPTS:
+                            await asyncio.sleep(POST_RETRY_BASE_SEC * attempt)
+            except Exception as e:
+                last_reason = f"{type(e).__name__}: {e}"
+                log.error(
+                    f"Error posting chunk {idx + 1}/{len(chunks)} to Discord "
+                    f"(attempt {attempt}/{POST_MAX_ATTEMPTS}): {e}"
+                )
+                if attempt < POST_MAX_ATTEMPTS:
+                    await asyncio.sleep(POST_RETRY_BASE_SEC * attempt)
 
+        attempts_used = max(attempts_used, attempt)
         if not posted:
             failed += 1
 
@@ -731,6 +811,12 @@ async def post_to_discord(agent: str, channel_id: str, content: str, reply_to: O
             f"post_to_discord: {failed} of {len(chunks)} chunk(s) failed for "
             f"{agent} in {channel_id}; message is incomplete"
         )
+        if dead_letter:
+            _write_dead_letter(
+                agent, channel_id, content,
+                f"{failed} of {len(chunks)} chunk(s) failed: {last_reason}",
+                attempts_used,
+            )
         return None
 
     return last_msg_id
@@ -1011,7 +1097,8 @@ async def process_agent_queue(agent: str):
         # Post response to Discord
         discord_msg_id = None
         if response_text and channel_id != "0":
-            discord_msg_id = await post_to_discord(agent, channel_id, response_text)
+            discord_msg_id = await post_to_discord(agent, channel_id, response_text,
+                                                   dead_letter=True)
 
         # Mark complete
         await db.execute(
@@ -1069,6 +1156,11 @@ async def crash_recovery():
         log.warning(f"Found {len(unposted)} unposted responses, retrying")
         for msg in unposted:
             if msg["response"]:
+                # Deliberately no dead_letter=True. These rows are already
+                # durable in the queue and are retried on every startup, so
+                # dead-lettering them would append a fresh copy of the same
+                # reply each time the server came up against a channel that is
+                # still unreachable.
                 discord_id = await post_to_discord(msg["agent"], msg["channel_id"], msg["response"])
                 if discord_id:
                     await db.execute(
@@ -1172,9 +1264,16 @@ async def handle_health(request):
             "session_id": agent_sessions.get(agent, "")[:8]
         }
 
+    # A non-zero count means replies were generated and never delivered. It is
+    # reported here because that failure is otherwise invisible — every agent
+    # looks idle and healthy while its answers are going nowhere.
+    undelivered = dead_letter_count()
+
     return web.json_response({
         "status": "healthy",
-        "agents": agent_status
+        "agents": agent_status,
+        "dead_letters": undelivered,
+        "dead_letter_path": str(DEAD_LETTER_PATH),
     })
 
 async def handle_agents(request):

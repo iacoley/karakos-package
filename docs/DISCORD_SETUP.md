@@ -144,6 +144,28 @@ Set `GUEST_TURN_LIMIT` in `config/.env` to change the cap.
 - The bot isn't in the server or doesn't have channel permissions
 - Re-invite using the URL generator with correct permissions
 
+**The agent answered but nothing appeared in the channel:**
+
+A reply that is generated and then fails to post is written to
+`data/discord-dead-letter.jsonl` rather than discarded — the agent ran and the
+tokens were spent, so the answer is worth keeping. `GET /health` reports the
+count:
+
+```json
+{ "status": "healthy", "dead_letters": 3, "dead_letter_path": "..." }
+```
+
+A non-zero count means the delivery path is broken, not that the agents are
+idle. Each record holds the agent, channel id, timestamp, failure reason and
+the full reply text, so it can be re-sent by hand once the cause is fixed.
+
+The usual cause is a revoked **Send Messages** permission in that channel;
+Discord answers 403 and the relay does not retry, because a revoked permission
+does not heal on its own. Transient failures (5xx, network) are retried
+`DISCORD_POST_MAX_ATTEMPTS` times (default 3) before being queued.
+
+The file only ever grows — prune it once the entries have been recovered.
+
 **Slash commands don't show up when you type `/`:**
 - Registration runs automatically on container start
   (`bin/register-discord-commands.py`, via `bin/entrypoint.sh`) and logs a
