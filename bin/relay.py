@@ -13,6 +13,7 @@ import discord
 import json
 import logging
 import os
+import re
 import subprocess
 import textwrap
 import time
@@ -56,6 +57,87 @@ def split_discord_message(text: str, max_length: int = 2000) -> List[str]:
         chunks.append(remaining)
 
     return chunks if chunks else [text]
+
+
+# =============================================================================
+# System commands
+# =============================================================================
+
+# Commands the relay handles itself instead of forwarding to an agent. Kept
+# deliberately small: these three are the ones you need when an agent is
+# already too wedged to read its own messages, which is exactly when shell
+# access is least convenient.
+SYS_COMMANDS = frozenset({"clear", "reload", "status"})
+
+# <@123>, <@!123> (nickname form), <@&123> (role).
+_MENTION_RE = re.compile(r"<@[!&]?\d+>")
+
+
+def strip_mentions(text: str) -> str:
+    """Drop Discord mention tokens so `@Agent /sys clear` matches as a command."""
+    return _MENTION_RE.sub(" ", text or "").strip()
+
+
+def parse_sys_command(content: str):
+    """Return (command, args) if `content` is a system command, else None.
+
+    Accepts both `/clear` and the older `/sys clear` — the prefix existed so a
+    single handler could tell a command from a sentence, and it stays because
+    it is still in people's fingers. Anything that is not a recognised command
+    returns None and falls through to normal agent routing, so a message that
+    merely opens with a slash is not swallowed.
+    """
+    bare = strip_mentions(content)
+    if not bare.startswith("/"):
+        return None
+
+    parts = bare[1:].split(None, 1)
+    if not parts:
+        return None
+    head = parts[0].lower()
+    rest = parts[1].strip() if len(parts) > 1 else ""
+
+    if head == "sys":
+        parts = rest.split(None, 1)
+        head = parts[0].lower() if parts else ""
+        rest = parts[1].strip() if len(parts) > 1 else ""
+
+    if head in SYS_COMMANDS:
+        return (head, rest)
+    return None
+
+
+def resolve_target_agent(mentioned, channel_default, known_agents):
+    """Pick which agent a system command acts on.
+
+    Order is mentioned > channel default > the only agent there is. The last
+    rung is the point: with two or more agents and nothing naming one, this
+    returns an error rather than picking. A system command that guesses its
+    target clears the wrong agent's session, and the person typing it has no
+    way to tell that happened.
+    """
+    known = list(known_agents or [])
+
+    if mentioned:
+        if mentioned not in known:
+            return None, f"Unknown agent `{mentioned}`."
+        return mentioned, None
+
+    if channel_default:
+        if channel_default not in known:
+            return None, f"This channel's default agent `{channel_default}` is not configured."
+        return channel_default, None
+
+    if len(known) == 1:
+        return known[0], None
+
+    if not known:
+        return None, "No agents are configured."
+
+    names = ", ".join(f"`{a}`" for a in sorted(known))
+    return None, f"Which agent? Mention one — this channel has no default. Configured: {names}"
+
+
 # =============================================================================
 # Configuration
 # =============================================================================
@@ -217,17 +299,126 @@ class DiscordAdapter(discord.Client):
                 break
 
         # Fall back to channel default agent
+        channel_name = self.get_channel_name(str(message.channel.id))
+        channel_default = None
+        if channel_name:
+            channel_config = channels_config.get("channels", {}).get(channel_name, {})
+            channel_default = channel_config.get("default_agent")
+
+        # System commands run here, not in the agent. An agent that has stopped
+        # reading its queue cannot process its own `/clear`, and that is the
+        # case the command exists for — so this intercept sits ahead of routing
+        # and never reaches send_to_agent_server.
+        parsed = parse_sys_command(message.content)
+        if parsed:
+            await self.handle_sys_command(message, parsed[0], parsed[1],
+                                          target_agent, channel_default)
+            return
+
         if not target_agent:
-            channel_name = self.get_channel_name(str(message.channel.id))
-            if channel_name:
-                channel_config = channels_config.get("channels", {}).get(channel_name, {})
-                target_agent = channel_config.get("default_agent")
+            target_agent = channel_default
 
         if not target_agent:
             return  # No routing
 
         # Send to agent server
         await self.send_to_agent_server(message, target_agent)
+
+    async def sys_reply(self, message: discord.Message, text: str):
+        """Answer a system command in the channel it was typed in."""
+        try:
+            for chunk in split_discord_message(f"`[SYS]` {text}"):
+                await message.channel.send(chunk)
+        except Exception as e:
+            log.error(f"Failed to post system command reply: {e}")
+
+    async def handle_sys_command(self, message: discord.Message, cmd: str,
+                                 args: str, mentioned: Optional[str],
+                                 channel_default: Optional[str]):
+        """Run a relay-side system command. Owner only."""
+        author = f"{message.author.display_name} ({message.author.id})"
+
+        # Logged before the permission check, not after: a denied attempt is
+        # the one you most want in the log.
+        log.info(f"[SYS] {author} -> /{cmd} {args}".strip())
+
+        # An unset OWNER_DISCORD_ID denies everyone. The alternative — treating
+        # "not configured" as "no restriction" — hands session control to any
+        # member of the server on a fresh install that skipped the setting.
+        if not OWNER_DISCORD_ID:
+            await self.sys_reply(message, "Permission denied — OWNER_DISCORD_ID is not configured.")
+            log.warning(f"[SYS] denied /{cmd} from {author}: OWNER_DISCORD_ID unset")
+            return
+
+        if message.author.id != OWNER_DISCORD_ID:
+            await self.sys_reply(message, "Permission denied.")
+            log.warning(f"[SYS] denied /{cmd} from {author}")
+            return
+
+        if cmd == "status":
+            await self.sys_status(message)
+            return
+
+        agent, err = resolve_target_agent(mentioned, channel_default, agent_config.keys())
+        if err:
+            await self.sys_reply(message, err)
+            return
+
+        if cmd == "clear":
+            ok, detail = await self.agent_server_post(f"/agents/{agent}/reset")
+            await self.sys_reply(
+                message,
+                f"`{agent}` session cleared." if ok else f"clear failed for `{agent}` — {detail}")
+        elif cmd == "reload":
+            ok, detail = await self.agent_server_post(f"/agents/{agent}/reload")
+            await self.sys_reply(
+                message,
+                f"`{agent}` reloaded, session preserved." if ok else f"reload failed for `{agent}` — {detail}")
+
+    async def sys_status(self, message: discord.Message):
+        """Report each agent's state, liveness and queue depth."""
+        try:
+            async with self.http_session.get(
+                f"{AGENT_SERVER_URL}/health",
+                headers={"Authorization": f"Bearer {AGENT_SERVER_TOKEN}"}
+            ) as resp:
+                if resp.status != 200:
+                    body = await resp.text()
+                    await self.sys_reply(message, f"agent server returned {resp.status}: {body[:200]}")
+                    return
+                health = await resp.json()
+        except Exception as e:
+            await self.sys_reply(message, f"could not reach the agent server — {e}")
+            return
+
+        agents = health.get("agents") or {}
+        if not agents:
+            await self.sys_reply(message, "No agents are configured.")
+            return
+
+        lines = []
+        for name in sorted(agents):
+            info = agents[name] or {}
+            lines.append(
+                f"`{name}` — {info.get('state', 'UNKNOWN')}, "
+                f"{'alive' if info.get('alive') else 'not running'}, "
+                f"queue {info.get('queue_depth', 0)}"
+            )
+        await self.sys_reply(message, "\n".join(lines))
+
+    async def agent_server_post(self, path: str):
+        """POST to the agent server. Returns (ok, detail-on-failure)."""
+        try:
+            async with self.http_session.post(
+                f"{AGENT_SERVER_URL}{path}",
+                headers={"Authorization": f"Bearer {AGENT_SERVER_TOKEN}"}
+            ) as resp:
+                if resp.status == 200:
+                    return True, ""
+                body = await resp.text()
+                return False, f"agent server returned {resp.status}: {body[:200]}"
+        except Exception as e:
+            return False, str(e)
 
     def get_channel_name(self, channel_id: str) -> Optional[str]:
         """Get channel name from ID"""
