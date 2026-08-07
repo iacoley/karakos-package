@@ -90,6 +90,45 @@ If you want each agent to post under its own identity:
 
 Without multi-bot setup, all agents post through the primary bot.
 
+## Shared Channels (Optional)
+
+By default a channel's `default_agent` answers every human message in it. That
+is right for a channel that exists to talk to the bot, and wrong for one you
+also use to talk to other people. Two per-channel keys in
+`config/channels.json` change it:
+
+```json
+{
+  "channels": {
+    "general": { "id": "...", "default_agent": "amos" },
+    "kitchen": { "id": "...", "default_agent": "amos", "reply_gate": true },
+    "agent-chat": { "id": "...", "default_agent": "amos", "guest_agents": true }
+  }
+}
+```
+
+**`reply_gate`** — for channels shared with more than one human. The agent
+answers when it is @mentioned, when the message is a reply to something it
+said, or when the message opens with its name. It stays quiet otherwise,
+including when people are trading messages quickly. It is silence-biased on
+purpose: staying quiet costs you one word to recover from, and interrupting
+costs you the conversation. Omit the key and the channel behaves as before.
+
+**`guest_agents`** — lets bots from *outside* this install address your agents
+in that channel. Off by default, so a stranger's bot in a shared server is
+ignored.
+
+Two rules apply to every bot regardless of that key:
+
+- A bot must @mention an agent to reach it. `default_agent` applies to humans
+  only — without that rule, two installs sharing a channel answer each other
+  until a rate limit or a cost cap intervenes.
+- Bot-to-bot exchanges stop after `GUEST_TURN_LIMIT` turns (default 12) with no
+  human in between, and the relay posts once to say why. Anyone speaking in the
+  channel refills the budget.
+
+Set `GUEST_TURN_LIMIT` in `config/.env` to change the cap.
+
 ## Troubleshooting
 
 **Bot appears offline:**

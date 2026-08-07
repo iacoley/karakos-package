@@ -139,6 +139,144 @@ def resolve_target_agent(mentioned, channel_default, known_agents):
 
 
 # =============================================================================
+# Reply gate — who is a message actually for?
+# =============================================================================
+
+# Above this many messages/minute from humans, assume the humans are talking to
+# each other rather than to us.
+VOLLEY_WINDOW_SEC = 90
+VOLLEY_MSGS_PER_MIN = 4.0
+# After speaking, we count as a participant for this long, and the volley rule
+# stops applying — otherwise we go mute exactly when a conversation we are part
+# of gets lively.
+PARTICIPATION_SEC = 240
+
+_NAME_OPENER_CACHE: Dict[str, "re.Pattern"] = {}
+
+
+def _name_opener(agent_name: str):
+    """`Amos, can you...` — a message that opens with the agent's name."""
+    key = (agent_name or "").lower()
+    if key not in _NAME_OPENER_CACHE:
+        _NAME_OPENER_CACHE[key] = re.compile(
+            r"^\s*(hey\s+|ok(?:ay)?\s+)?" + re.escape(key) + r"\b[\s,:!?]*", re.I
+        )
+    return _NAME_OPENER_CACHE[key]
+
+
+class ReplyGate:
+    """Decide whether a message in a shared human channel is addressed to us.
+
+    Only channels configured with `"reply_gate": true` are gated; everywhere
+    else behaviour is unchanged, so an install that never opts in sees exactly
+    what it saw before.
+
+    Two tiers, silence-biased:
+
+      Tier 1, deterministic and always wins:
+          @mention of one of our agents ....... ENGAGE
+          reply to one of our agents' messages  ENGAGE
+          message opens with an agent's name .. ENGAGE
+          reply to a different human .......... SILENT
+
+      Volley: humans trading messages quickly are talking to each other, so
+      above the rate threshold we stay quiet — unless we are already a
+      participant (we spoke recently in that channel).
+
+    Anything still unresolved returns ASK, meaning "a classifier could decide
+    this". There is no classifier here, and the relay treats ASK as silence:
+    an unwanted "was that for me?" costs the humans their conversation, while
+    silence costs one word to recover from. ASK is kept distinct from SILENT so
+    an install can hook a classifier in without reworking the tiers.
+    """
+
+    def __init__(self):
+        # channel id -> {"human_msgs": [ts], "last_post": ts}
+        self._channels: Dict[int, Dict] = {}
+
+    def _state(self, channel_id: int) -> Dict:
+        return self._channels.setdefault(channel_id, {"human_msgs": [], "last_post": 0.0})
+
+    def note_agent_post(self, channel_id: int, now: Optional[float] = None):
+        """Call whenever one of our agents posts, so participation stays accurate."""
+        self._state(int(channel_id))["last_post"] = now if now is not None else time.time()
+
+    def _rate(self, st: Dict, now: float) -> float:
+        cutoff = now - VOLLEY_WINDOW_SEC
+        st["human_msgs"] = [t for t in st["human_msgs"] if t >= cutoff]
+        return len(st["human_msgs"]) * 60.0 / VOLLEY_WINDOW_SEC
+
+    def decide(self, *, channel_id: int, content: str, mentions_agent: bool,
+               replied_to_author_id: Optional[int], agent_ids: set,
+               agent_names=(), now: Optional[float] = None):
+        """Return (verdict, reason) where verdict is 'engage' | 'silent' | 'ask'."""
+        now = now if now is not None else time.time()
+        st = self._state(int(channel_id))
+        st["human_msgs"].append(now)
+
+        if mentions_agent:
+            return ("engage", "@mention")
+        if replied_to_author_id is not None and replied_to_author_id in agent_ids:
+            return ("engage", "reply to agent")
+        for name in agent_names or ():
+            if name and _name_opener(name).match(content or ""):
+                return ("engage", f"addressed by name ({name})")
+        if replied_to_author_id is not None and replied_to_author_id not in agent_ids:
+            # Replying to another human is the clearest not-for-me signal there is.
+            return ("silent", "reply to another human")
+
+        rate = self._rate(st, now)
+        participating = (now - st["last_post"]) < PARTICIPATION_SEC
+        if rate >= VOLLEY_MSGS_PER_MIN and not participating:
+            return ("silent", f"volley {rate:.1f}/min, not participating")
+
+        return ("ask", "ambiguous")
+
+
+# =============================================================================
+# Guest turn budget — two bots in one channel
+# =============================================================================
+
+# Two agents that each answer the other will not stop on their own. Routing to
+# a bot already requires an explicit @mention, which makes a loop a deliberate
+# act rather than an accident; this is the backstop for when it is deliberate.
+# After this many bot messages with no human in between, we go quiet until a
+# human speaks in the channel again.
+GUEST_TURN_LIMIT = int(os.environ.get("GUEST_TURN_LIMIT", "12"))
+
+
+class GuestBudget:
+    """Bot-to-bot turns per channel since the last human message."""
+
+    def __init__(self, limit: int = None):
+        self.limit = GUEST_TURN_LIMIT if limit is None else limit
+        self._turns: Dict[int, int] = {}
+        self._announced: set = set()
+
+    def take(self, channel_id: int):
+        """Count one bot turn. Returns (allowed, turns, should_announce).
+
+        `should_announce` is true exactly once per exhaustion — on the message
+        that crosses the limit — so the notice explaining the stop cannot itself
+        become the next runaway.
+        """
+        cid = int(channel_id)
+        turns = self._turns.get(cid, 0) + 1
+        self._turns[cid] = turns
+        if turns > self.limit:
+            announce = cid not in self._announced
+            self._announced.add(cid)
+            return (False, turns, announce)
+        return (True, turns, False)
+
+    def reset(self, channel_id: int):
+        """A human spoke — the budget refills."""
+        cid = int(channel_id)
+        self._turns.pop(cid, None)
+        self._announced.discard(cid)
+
+
+# =============================================================================
 # Configuration
 # =============================================================================
 
@@ -260,6 +398,8 @@ class DiscordAdapter(discord.Client):
 
         self.http_session = None
         self.server_ids = set()
+        self.reply_gate = ReplyGate()
+        self.guest_budget = GuestBudget()
 
     async def setup_hook(self):
         """Initialize HTTP session"""
@@ -278,8 +418,11 @@ class DiscordAdapter(discord.Client):
 
     async def on_message(self, message: discord.Message):
         """Route Discord message to agent"""
-        # Ignore own messages
+        # Our own posts feed the reply gate's participation rule before they are
+        # discarded — a channel we are actively speaking in is one we should
+        # keep answering in, and that is only knowable from our own traffic.
         if message.author == self.user:
+            self.reply_gate.note_agent_post(message.channel.id)
             return
 
         # Ignore messages from servers we aren't configured for
@@ -300,29 +443,116 @@ class DiscordAdapter(discord.Client):
 
         # Fall back to channel default agent
         channel_name = self.get_channel_name(str(message.channel.id))
-        channel_default = None
+        channel_config = {}
         if channel_name:
-            channel_config = channels_config.get("channels", {}).get(channel_name, {})
-            channel_default = channel_config.get("default_agent")
+            channel_config = channels_config.get("channels", {}).get(channel_name, {}) or {}
+        channel_default = channel_config.get("default_agent")
 
         # System commands run here, not in the agent. An agent that has stopped
         # reading its queue cannot process its own `/clear`, and that is the
         # case the command exists for — so this intercept sits ahead of routing
-        # and never reaches send_to_agent_server.
+        # and never reaches send_to_agent_server. It also sits ahead of both
+        # gates below: an owner typing `/clear` in a gated channel is the least
+        # ambiguous message there is, and a wedged agent is exactly when you
+        # cannot afford a gate to swallow it.
         parsed = parse_sys_command(message.content)
         if parsed:
             await self.handle_sys_command(message, parsed[0], parsed[1],
                                           target_agent, channel_default)
             return
 
-        if not target_agent:
-            target_agent = channel_default
+        agent_ids = set(discord_id_to_agent.keys())
+        if self.user:
+            agent_ids.add(self.user.id)
+
+        if message.author.bot:
+            # A sibling agent's post also counts as us participating.
+            if message.author.id in discord_id_to_agent:
+                self.reply_gate.note_agent_post(message.channel.id)
+
+            if not await self.allow_bot_message(message, target_agent, channel_config):
+                return
+        else:
+            # A human spoke: the bot-to-bot budget refills.
+            self.guest_budget.reset(message.channel.id)
+
+            if channel_config.get("reply_gate"):
+                replied_to = None
+                ref = getattr(message, "reference", None)
+                resolved = getattr(ref, "resolved", None) if ref else None
+                if resolved is not None and getattr(resolved, "author", None) is not None:
+                    replied_to = resolved.author.id
+
+                verdict, reason = self.reply_gate.decide(
+                    channel_id=message.channel.id,
+                    content=message.content,
+                    mentions_agent=target_agent is not None,
+                    replied_to_author_id=replied_to,
+                    agent_ids=agent_ids,
+                    agent_names=list(agent_config.keys()),
+                )
+                if verdict != "engage":
+                    log.info(
+                        f"[gate] #{channel_name or message.channel.id} "
+                        f"{message.author.display_name}: {verdict} ({reason})"
+                    )
+                    return
+
+            if not target_agent:
+                target_agent = channel_default
 
         if not target_agent:
             return  # No routing
 
         # Send to agent server
         await self.send_to_agent_server(message, target_agent)
+
+    async def allow_bot_message(self, message: discord.Message,
+                                target_agent: Optional[str],
+                                channel_config: Dict) -> bool:
+        """Whether a message from another bot may be routed to an agent.
+
+        Two rules, and the first is the one that matters. A bot NEVER routes on
+        a channel's `default_agent` — it must @mention an agent by name. Two
+        installs sharing a channel with a default agent answer each other
+        forever otherwise, and the bill is the first anyone hears about it.
+
+        Bots outside our own agent registry additionally need the channel to
+        opt in with `"guest_agents": true`; a stranger's bot in a shared server
+        is not something an install should have to notice to be safe from.
+        """
+        channel_name = self.get_channel_name(str(message.channel.id)) or message.channel.id
+        known_sibling = message.author.id in discord_id_to_agent
+
+        if not known_sibling and not channel_config.get("guest_agents"):
+            return False
+
+        if not target_agent:
+            return False  # bots must address an agent explicitly
+
+        allowed, turns, announce = self.guest_budget.take(message.channel.id)
+        if allowed:
+            log.info(
+                f"[guest {turns}/{self.guest_budget.limit}] #{channel_name} "
+                f"{message.author.display_name} -> {target_agent}"
+            )
+            return True
+
+        log.warning(
+            f"[guest] #{channel_name} {message.author.display_name} -> {target_agent}: "
+            f"turn {turns} exceeds GUEST_TURN_LIMIT ({self.guest_budget.limit}), "
+            f"staying quiet until a human speaks"
+        )
+        if announce:
+            try:
+                await message.channel.send(
+                    f"`[SYS]` Stopping here — {self.guest_budget.limit} bot-to-bot turns "
+                    f"with no human in between (GUEST_TURN_LIMIT). "
+                    f"I'll pick back up when a person says something."
+                )
+            except Exception as e:
+                log.error(f"Failed to post guest-limit notice: {e}")
+        return False
 
     async def sys_reply(self, message: discord.Message, text: str):
         """Answer a system command in the channel it was typed in."""
