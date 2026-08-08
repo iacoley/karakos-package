@@ -83,6 +83,27 @@ def run_health_monitor():
     except subprocess.CalledProcessError as e:
         log.error(f"Health monitor failed: {e.stderr}")
 
+def run_wedge_check():
+    """Check for agents that are alive but stuck.
+
+    Runs every minute, unlike the daily health sweep, because the failure it
+    catches has a user waiting on the other end of it. Exit 1 means "wedged
+    and alerted", which is a finding rather than an error, so it is not
+    checked as a subprocess failure.
+    """
+    try:
+        result = subprocess.run(
+            ["python3", f"{WORKSPACE_ROOT}/bin/wedge-check.py"],
+            capture_output=True,
+            text=True
+        )
+        if result.returncode == 1:
+            log.warning(f"Wedged agent detected: {result.stdout.strip()}")
+        elif result.returncode != 0:
+            log.error(f"Wedge check failed ({result.returncode}): {result.stderr.strip()}")
+    except OSError as e:
+        log.error(f"Wedge check could not run: {e}")
+
 def check_updates():
     """Check for Karakos updates"""
     log.info("Checking for updates")
@@ -137,6 +158,10 @@ def main():
     # Schedule maintenance tasks
     schedule.every().day.at("03:00").do(run_memory_maintenance)
     schedule.every().day.at("04:00").do(run_health_monitor)
+    # Every minute, not daily: the acceptance test for a wedged agent is an
+    # alert within two minutes, and a check that runs at 04:00 cannot make
+    # that promise at any other hour. It is a file read and a comparison.
+    schedule.every(1).minutes.do(run_wedge_check)
     schedule.every().day.at("04:30").do(purge_old_data)
     schedule.every().monday.at("05:00").do(check_updates)  # Weekly update check
 

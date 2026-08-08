@@ -57,6 +57,15 @@ COST_WARNING_THRESHOLD = float(os.environ.get("COST_WARNING_THRESHOLD", "0.75"))
 # with nowhere to go must not become an exception on the turn that raised it.
 RATE_LIMIT_ALERT_CHANNEL_ID = os.environ.get("RATE_LIMIT_ALERT_CHANNEL_ID", "")
 
+# Per-agent liveness beacons, read by bin/wedge-check.py from OUTSIDE this
+# process. See write_agent_beacon.
+AGENT_BEACON_DIR = WORKSPACE_ROOT / "data" / "health" / "agents"
+
+# Beacon writes are throttled: a busy turn emits events far faster than any
+# watcher samples, and the beacon only has to be fresher than the wedge
+# threshold to prove liveness.
+BEACON_MIN_INTERVAL_SEC = 1.0
+
 # Queue limits
 QUEUE_DEPTH_LIMIT = 50
 TYPING_INTERVAL = 8  # seconds
@@ -662,6 +671,64 @@ async def check_cost_limits(author_id: str) -> Dict[str, Any]:
     return {"exceeded": False, "daily": daily_total, "monthly": monthly_total}
 
 # =============================================================================
+# Liveness beacons
+# =============================================================================
+
+# health-monitor.py reads staleness out of data/health/*.json, which catches a
+# component that has stopped or crashed. It cannot see the failure that
+# actually strands a user: a process that is alive and stuck. The claude
+# subprocess is running, this server's event loop is fine, /health answers
+# 200, the port is open — and the messages go nowhere.
+#
+# What distinguishes a wedge from an idle agent is not staleness alone. An
+# idle agent writes nothing for hours and that is correct. A wedge is
+# "claimed a turn, then went silent", so the beacon carries BOTH the state and
+# the last activity time, and only the pair is diagnostic.
+#
+# The beacon is written here, by the loop that would go silent, and read by
+# bin/wedge-check.py, which runs as a separate process on its own schedule. A
+# check that runs inside the thing it is checking is not a check.
+
+_last_beacon_write: Dict[str, float] = {}
+
+
+def write_agent_beacon(agent: str, state: str, message_id: Optional[str] = None,
+                       force: bool = False) -> None:
+    """Record that this agent's processing loop is alive, and what it is doing.
+
+    Best-effort and synchronous: it is a small write to a tmpfs-speed path,
+    and it must never raise into the turn it is reporting on. A beacon that
+    could crash a reply would be worse than no beacon.
+
+    `force` bypasses the throttle for state transitions, which are the edges
+    a watcher most needs to see promptly.
+    """
+    now = time.time()
+    if not force and now - _last_beacon_write.get(agent, 0.0) < BEACON_MIN_INTERVAL_SEC:
+        return
+    _last_beacon_write[agent] = now
+
+    try:
+        AGENT_BEACON_DIR.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "agent": agent,
+            "state": state,
+            "last_activity": datetime.now().isoformat(),
+            "message_id": message_id,
+            "pid": os.getpid(),
+        }
+        path = AGENT_BEACON_DIR / f"{agent}.json"
+        # Written via a temp file and renamed: the watcher is reading this
+        # concurrently, and a partial write would read as corrupt — which the
+        # watcher must not be able to mistake for a wedge.
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(payload))
+        tmp.replace(path)
+    except Exception as e:
+        log.debug(f"Could not write liveness beacon for {agent}: {e}")
+
+
+# =============================================================================
 # Rate-limit headroom
 # =============================================================================
 
@@ -1142,6 +1209,7 @@ async def send_to_agent(agent: str, content: str, message_ids: List[str]):
         return
 
     agent_states[agent] = "PROCESSING"
+    write_agent_beacon(agent, "PROCESSING", force=True)
     response_buffers[agent] = ""
 
     # Send message — Claude Code stream-json input envelope.
@@ -1158,6 +1226,7 @@ async def send_to_agent(agent: str, content: str, message_ids: List[str]):
     except Exception as e:
         log.error(f"Error sending to {agent}: {e}")
         agent_states[agent] = "ERROR_RECOVERY"
+        write_agent_beacon(agent, "ERROR_RECOVERY", force=True)
 
 async def write_streaming_response(message_ids: List[str], text: str) -> None:
     """Push partial response text into message_queue so SSE polling sees it.
@@ -1214,6 +1283,13 @@ async def read_agent_response(
                 continue
 
             event_type = event.get("type")
+
+            # Every event is proof the turn is still moving. This is the whole
+            # beacon: a SIGSTOPped claude emits nothing, readline() blocks
+            # here, and the timestamp stops advancing while the state stays
+            # PROCESSING — which is precisely the pair wedge-check.py looks
+            # for. Throttled internally, so a chatty turn is cheap.
+            write_agent_beacon(agent, "PROCESSING", message_id=msg_ids[0] if msg_ids else None)
 
             # One `system`/`init` event opens the stream, listing the tool
             # set the CLI actually resolved for this session. A tool named
@@ -1306,6 +1382,7 @@ async def read_agent_response(
     final_text = THINKING_BLOCK_RE.sub("", final_text).strip()
 
     agent_states[agent] = "IDLE"
+    write_agent_beacon(agent, "IDLE", force=True)
     return final_text, metadata
 
 async def process_agent_queue(agent: str):
@@ -1866,6 +1943,12 @@ async def startup(app):
         agent_locks[agent] = asyncio.Lock()
         agent_states[agent] = "IDLE"
         response_buffers[agent] = ""
+        # Overwrite any beacon left behind by a previous process. A crash
+        # mid-turn leaves one reading PROCESSING with a timestamp that will
+        # never advance again — which is indistinguishable from a live wedge,
+        # so without this every restart-after-crash pages forever about an
+        # agent that is now fine.
+        write_agent_beacon(agent, "IDLE", force=True)
 
     # Crash recovery
     await crash_recovery()
