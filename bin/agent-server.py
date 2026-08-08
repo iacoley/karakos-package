@@ -147,6 +147,7 @@ async def init_db():
             content TEXT NOT NULL,
             message_id TEXT UNIQUE NOT NULL,
             mentions_agent INTEGER DEFAULT 0,
+            attachments TEXT,
             processed INTEGER DEFAULT 0,
             response TEXT,
             discord_response_id TEXT,
@@ -191,8 +192,27 @@ async def init_db():
         )
     """)
 
+    # Migrations for databases created before a column existed. CREATE TABLE
+    # IF NOT EXISTS is a no-op against an existing table, so a new column in
+    # the definition above reaches upgraded installs only through here.
+    await ensure_column("message_queue", "attachments", "TEXT")
+
     await db.commit()
     log.info("Database initialized")
+
+
+async def ensure_column(table: str, column: str, decl: str) -> None:
+    """Add `column` to `table` if it is not already there.
+
+    SQLite has no `ADD COLUMN IF NOT EXISTS`, and a second ALTER raises rather
+    than passing, so the PRAGMA read is the guard.
+    """
+    async with db.execute(f"PRAGMA table_info({table})") as cursor:
+        existing = {row[1] for row in await cursor.fetchall()}
+    if column in existing:
+        return
+    await db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+    log.info(f"Migrated {table}: added column {column}")
 
 # =============================================================================
 # Configuration Loading
@@ -621,6 +641,71 @@ async def check_cost_limits(author_id: str) -> Dict[str, Any]:
         return {"exceeded": True, "reason": "monthly", "total": monthly_total, "limit": COST_MONTHLY_LIMIT}
 
     return {"exceeded": False, "daily": daily_total, "monthly": monthly_total}
+
+# =============================================================================
+# Attachments
+# =============================================================================
+
+def _human_size(size) -> str:
+    """Bytes as something an agent can reason about at a glance."""
+    if not isinstance(size, (int, float)) or size < 0:
+        return "unknown size"
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024 or unit == "GB":
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} GB"
+
+
+def format_attachments(raw) -> str:
+    """Render a queued message's attachments as lines for the agent envelope.
+
+    Returns "" when there are none, so callers can append unconditionally.
+
+    Every attachment gets a line whether or not the relay managed to save it.
+    The failure line is the point of the feature as much as the success line:
+    before this, a message carrying a file reached the agent as bare text and
+    the user got an answer that never acknowledged the file existed.
+    """
+    if not raw:
+        return ""
+
+    if isinstance(raw, str):
+        try:
+            attachments = json.loads(raw)
+        except (ValueError, TypeError):
+            log.warning("Unparseable attachments column: %r", raw[:200])
+            return ""
+    else:
+        attachments = raw
+
+    if not isinstance(attachments, list) or not attachments:
+        return ""
+
+    lines = []
+    for item in attachments:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("filename") or "unnamed"
+        path = item.get("path")
+        if path:
+            descriptor = ", ".join(
+                p for p in (item.get("content_type"), _human_size(item.get("size"))) if p
+            )
+            lines.append(f"  - {name} ({descriptor}) saved at: {path}")
+        else:
+            reason = item.get("skipped") or "not available"
+            lines.append(f"  - {name} — NOT saved: {reason}")
+
+    if not lines:
+        return ""
+
+    header = (
+        f"  [{len(lines)} attachment(s) on this message. "
+        "Open a saved one with the Read tool at the path given.]"
+    )
+    return "\n".join([header, *lines])
+
 
 # =============================================================================
 # Discord Integration
@@ -1065,7 +1150,11 @@ async def process_agent_queue(agent: str):
             timestamp = msg["created_at"]
             author = msg["author"]
             content = msg["content"]
-            formatted_parts.append(f"[{timestamp}] {author}: {content}")
+            part = f"[{timestamp}] {author}: {content}"
+            attachment_lines = format_attachments(msg["attachments"])
+            if attachment_lines:
+                part = f"{part}\n{attachment_lines}"
+            formatted_parts.append(part)
 
         formatted_content = "\n\n".join(formatted_parts)
 
@@ -1192,11 +1281,17 @@ async def handle_message(request):
     content = data.get("content", "")
     message_id = data.get("message_id", f"msg-{uuid.uuid4()}")
     mentions_agent = data.get("mentions_agent", False)
+    attachments = data.get("attachments") or []
+    if not isinstance(attachments, list):
+        return web.json_response({"error": "attachments must be a list"}, status=400)
 
     if not agent or agent not in agent_config:
         return web.json_response({"error": "Invalid agent"}, status=400)
 
-    if not content:
+    # An image posted with no caption is a real message with empty text. It
+    # used to be rejected here as "Empty content", which is the first place
+    # attachment support has to stop failing.
+    if not content and not attachments:
         return web.json_response({"error": "Empty content"}, status=400)
 
     # Check cost limits (unless owner or heartbeat)
@@ -1223,10 +1318,11 @@ async def handle_message(request):
         await db.execute(
             """
             INSERT INTO message_queue
-            (agent, channel, channel_id, server, author, author_id, is_bot, content, message_id, mentions_agent)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (agent, channel, channel_id, server, author, author_id, is_bot, content, message_id, mentions_agent, attachments)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (agent, channel, channel_id, server, author, author_id, int(is_bot), content, message_id, int(mentions_agent))
+            (agent, channel, channel_id, server, author, author_id, int(is_bot), content, message_id,
+             int(mentions_agent), json.dumps(attachments) if attachments else None)
         )
         await db.commit()
     except Exception as e:
