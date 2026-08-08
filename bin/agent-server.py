@@ -1675,6 +1675,12 @@ async def handle_agents(request):
         agents_list.append({
             "name": agent,
             "model": config.get("model"),
+            # The same defaults the subprocess is actually launched with (see
+            # start_agent). Reporting the raw config.get() would show a blank
+            # for every agent that relies on the default, which reads as "not
+            # configured" rather than "configured by omission".
+            "max_turns": config.get("max_turns", 200),
+            "timeout": config.get("timeout"),
             "state": agent_states.get(agent, "UNKNOWN"),
             "has_discord_token": agent in AGENT_TOKENS
         })

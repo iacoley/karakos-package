@@ -9,17 +9,23 @@ interface ConfigData {
   workspace: string;
 }
 
+// /api/agents/config returns { agents: [...] }, an ARRAY of objects each
+// carrying its own name -- not a dict keyed by name. Typing it as a Record and
+// reading it with Object.entries() yields numeric indices ("0", "1", ...) in
+// place of agent names, and the annotation cannot catch that: it is an
+// assertion about untyped JSON, not a check of it.
 interface AgentConfig {
-  agents: Record<string, {
-    model: string;
-    max_turns: number;
-    timeout: number;
-  }>;
+  agents: {
+    name: string;
+    model: string | null;
+    max_turns: number | null;
+    timeout: number | null;
+  }[];
 }
 
 export default function SettingsPage() {
   const { data: config } = usePoll<ConfigData>("/api/health", 60000);
-  const { data: agents } = usePoll<AgentConfig>("/api/agents", 60000);
+  const { data: agents } = usePoll<AgentConfig>("/api/agents/config", 60000);
 
   return (
     <div>
@@ -32,12 +38,12 @@ export default function SettingsPage() {
       </Section>
 
       <Section title="Agent Configuration">
-        {agents?.agents && Object.entries(agents.agents).map(([name, cfg]) => (
-          <div key={name} style={{ marginBottom: "0.75rem" }}>
-            <h3 style={{ fontSize: "0.9rem", margin: "0 0 0.25rem" }}>{name}</h3>
-            <Row label="Model" value={cfg.model} />
-            <Row label="Max Turns" value={String(cfg.max_turns)} />
-            <Row label="Timeout" value={`${cfg.timeout}s`} />
+        {agents?.agents?.map((cfg) => (
+          <div key={cfg.name} style={{ marginBottom: "0.75rem" }}>
+            <h3 style={{ fontSize: "0.9rem", margin: "0 0 0.25rem" }}>{cfg.name}</h3>
+            <Row label="Model" value={cfg.model || "—"} />
+            <Row label="Max Turns" value={cfg.max_turns == null ? "—" : String(cfg.max_turns)} />
+            <Row label="Timeout" value={cfg.timeout == null ? "—" : `${cfg.timeout}s`} />
           </div>
         ))}
       </Section>
