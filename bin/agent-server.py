@@ -1163,11 +1163,20 @@ async def crash_recovery():
                 # still unreachable.
                 discord_id = await post_to_discord(msg["agent"], msg["channel_id"], msg["response"])
                 if discord_id:
+                    # Commit per-message, not once after the whole loop. The
+                    # old batched commit meant a crash partway through this
+                    # loop left every already-posted-but-not-yet-committed
+                    # message's discord_response_id at NULL, so the *next*
+                    # crash_recovery() sweep would find and repost them —
+                    # the recovery path duplicating exactly what it exists
+                    # to prevent. Committing immediately after each
+                    # successful post bounds the risk to the single message
+                    # in flight at crash time, not the whole batch.
                     await db.execute(
                         "UPDATE message_queue SET discord_response_id = ? WHERE message_id = ?",
                         (discord_id, msg["message_id"])
                     )
-        await db.commit()
+                    await db.commit()
 
 # =============================================================================
 # HTTP API

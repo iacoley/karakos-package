@@ -65,3 +65,53 @@ def test_create_agent_script_targets_register():
     assert create_agent.exists()
     body = create_agent.read_text()
     assert "/agents/$AGENT_NAME/register" in body
+
+
+def test_crash_recovery_commits_unposted_retry_per_message():
+    """Regression test for the duplicate-post race: crash_recovery()'s
+    "unposted responses" retry loop must commit right after each
+    successful post, not once after the whole loop. A batched commit
+    means a crash partway through the loop leaves earlier
+    already-posted-to-Discord messages with discord_response_id still
+    NULL, so the next startup's sweep finds and reposts them — the
+    recovery path duplicating exactly what it exists to prevent.
+
+    Checked structurally (source order + indentation) rather than by
+    running the server, matching this file's existing style — booting
+    agent-server.py's full event loop + sqlite + subprocess stack is out
+    of scope for a unit test.
+    """
+    src = AGENT_SERVER.read_text()
+
+    marker = "Retry posting messages that completed but weren't posted"
+    start = src.index(marker)
+    next_section = src.index("\n# ====", start)
+    section = src[start:next_section]
+
+    execute_idx = section.index("await db.execute(", section.index("if discord_id:"))
+    commit_idx = section.index("await db.commit()", execute_idx)
+
+    # The commit must be the very next statement after the UPDATE call
+    # closes — i.e. still nested inside "if discord_id:" and therefore
+    # inside "for msg in unposted:", not dedented back out to loop level
+    # or function level.
+    between = section[execute_idx:commit_idx]
+    assert between.count("\n") <= 4, (
+        "db.commit() has drifted away from the per-message UPDATE — "
+        "if it moved back outside the loop, the duplicate-post race "
+        "this test guards against is back"
+    )
+
+    execute_line = section[:execute_idx].count("\n")
+    commit_line = section[:commit_idx].count("\n")
+    execute_indent = len(section.splitlines()[execute_line]) - len(
+        section.splitlines()[execute_line].lstrip()
+    )
+    commit_indent = len(section.splitlines()[commit_line]) - len(
+        section.splitlines()[commit_line].lstrip()
+    )
+    assert commit_indent == execute_indent, (
+        "db.commit() must be indented exactly as deep as the 'await "
+        "db.execute(' statement it follows — a dedent means it moved "
+        "back outside the loop"
+    )
