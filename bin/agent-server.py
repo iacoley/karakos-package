@@ -53,6 +53,10 @@ COST_DAILY_LIMIT = float(os.environ.get("COST_DAILY_LIMIT", "25.00"))
 COST_MONTHLY_LIMIT = float(os.environ.get("COST_MONTHLY_LIMIT", "500.00"))
 COST_WARNING_THRESHOLD = float(os.environ.get("COST_WARNING_THRESHOLD", "0.75"))
 
+# Where the rate-limit headroom warning goes. Unset means log-only: an alert
+# with nowhere to go must not become an exception on the turn that raised it.
+RATE_LIMIT_ALERT_CHANNEL_ID = os.environ.get("RATE_LIMIT_ALERT_CHANNEL_ID", "")
+
 # Queue limits
 QUEUE_DEPTH_LIMIT = 50
 TYPING_INTERVAL = 8  # seconds
@@ -189,6 +193,21 @@ async def init_db():
             output_tokens INTEGER,
             duration_ms REAL,
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Rate-limit state table. One row per agent, overwritten — this is a
+    # current-headroom reading, not a history, and the CLI resends it.
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS rate_limit_state (
+            agent TEXT PRIMARY KEY,
+            status TEXT,
+            rate_limit_type TEXT,
+            resets_at INTEGER,
+            overage_status TEXT,
+            is_using_overage INTEGER DEFAULT 0,
+            alerted_for_resets_at INTEGER,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
@@ -643,6 +662,178 @@ async def check_cost_limits(author_id: str) -> Dict[str, Any]:
     return {"exceeded": False, "daily": daily_total, "monthly": monthly_total}
 
 # =============================================================================
+# Rate-limit headroom
+# =============================================================================
+
+# `cost_events` tracks dollars. Dollars are not what stops an agent
+# mid-sentence — the rate limit is, and until now it was invisible until it
+# fired, at which point the user saw a failed message with no explanation.
+#
+# The numbers come from the CLI itself. It emits `rate_limit_event` in the
+# stream-json output — {status, resetsAt, rateLimitType, overageStatus,
+# isUsingOverage} — so this is read in-band off a stream that is already open.
+# Deliberately NOT a poller against the OAuth usage endpoint: that answers the
+# same question on separate auth, on its own schedule, and is stale between
+# polls, while this updates on every turn the limit changes.
+
+# Nominal window lengths, so "resets at 03:15" can become "72% through the
+# window". The CLI names the type; it does not give the length.
+RATE_LIMIT_WINDOW_SECONDS = {
+    "five_hour": 5 * 3600,
+    "seven_day": 7 * 86400,
+}
+
+# The CLI's own escalation. `allowed_warning` is it telling us headroom is
+# running out; `rejected` is the limit already firing.
+RATE_LIMIT_ALERT_STATUSES = frozenset({"allowed_warning", "rejected"})
+
+# Fraction of the window elapsed at which we say so, once. The issue's
+# acceptance test names 80%.
+RATE_LIMIT_ALERT_FRACTION = 0.8
+
+
+def rate_limit_window_progress(info, now=None):
+    """Fraction (0.0–1.0) of the current rate-limit window that has elapsed.
+
+    Returns None when it cannot be computed, which callers must render as
+    "unknown" rather than as 0%. A missing `resetsAt`, an unrecognised
+    `rateLimitType`, or a reset time already in the past all land here — and
+    reporting any of them as "0% used" would be the same failure this issue
+    is about, dressed as a number.
+    """
+    if not isinstance(info, dict):
+        return None
+    resets_at = info.get("resetsAt")
+    window = RATE_LIMIT_WINDOW_SECONDS.get(info.get("rateLimitType"))
+    if not isinstance(resets_at, (int, float)) or not window:
+        return None
+
+    now = time.time() if now is None else now
+    remaining = resets_at - now
+    if remaining <= 0:
+        # The window is over; the next event will describe the new one.
+        return None
+    if remaining >= window:
+        return 0.0
+    return (window - remaining) / window
+
+
+def format_usage_report(row, now=None):
+    """Render a rate_limit_state row for a human. Never raises on a partial row."""
+    if not row:
+        return (
+            "No rate-limit reading yet — the CLI reports headroom in-band, so "
+            "this fills in the first time the agent takes a turn."
+        )
+
+    info = {
+        "resetsAt": row["resets_at"],
+        "rateLimitType": row["rate_limit_type"],
+    }
+    progress = rate_limit_window_progress(info, now=now)
+    window_name = (row["rate_limit_type"] or "unknown").replace("_", "-")
+
+    if progress is None:
+        consumed = "window position unknown"
+    else:
+        consumed = f"{progress * 100:.0f}% through the {window_name} window"
+
+    parts = [f"status `{row['status'] or 'unknown'}` — {consumed}"]
+
+    if row["resets_at"]:
+        now = time.time() if now is None else now
+        remaining = int(row["resets_at"] - now)
+        if remaining > 0:
+            hours, minutes = divmod(remaining // 60, 60)
+            parts.append(f"resets in {hours}h{minutes:02d}m")
+        else:
+            parts.append("window has reset")
+
+    if row["is_using_overage"]:
+        parts.append("currently on overage")
+    elif row["overage_status"]:
+        parts.append(f"overage {row['overage_status']}")
+
+    return ", ".join(parts)
+
+
+async def record_rate_limit_event(agent: str, info, now=None) -> None:
+    """Persist the CLI's latest rate-limit reading and alert once per window.
+
+    The alert is keyed on `resetsAt`, not on a boolean: a flag would fire once
+    ever, and the limit is a recurring window. Keying on the reset timestamp
+    means each new window can alert again, and the same window cannot.
+
+    `resetsAt` is fixed for the life of a window, so the same value arrives on
+    every event within it while the elapsed fraction climbs. That is why the
+    column is stamped only when an alert is actually posted: stamping it on
+    every write would mark a window as "already warned" during its quiet
+    first hours and swallow the warning it was supposed to give at 80%.
+
+    `now` is injectable so that progression through one window can be tested
+    without waiting out the window.
+    """
+    if not isinstance(info, dict) or not info:
+        return
+
+    status = info.get("status")
+    resets_at = info.get("resetsAt")
+    resets_at = int(resets_at) if isinstance(resets_at, (int, float)) else None
+
+    async with db.execute(
+        "SELECT alerted_for_resets_at FROM rate_limit_state WHERE agent = ?", (agent,)
+    ) as cursor:
+        prior = await cursor.fetchone()
+    already_alerted = prior["alerted_for_resets_at"] if prior else None
+
+    await db.execute(
+        """
+        INSERT INTO rate_limit_state
+            (agent, status, rate_limit_type, resets_at, overage_status,
+             is_using_overage, alerted_for_resets_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(agent) DO UPDATE SET
+            status = excluded.status,
+            rate_limit_type = excluded.rate_limit_type,
+            resets_at = excluded.resets_at,
+            overage_status = excluded.overage_status,
+            is_using_overage = excluded.is_using_overage,
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        (agent, status, info.get("rateLimitType"), resets_at,
+         info.get("overageStatus"), int(bool(info.get("isUsingOverage"))),
+         already_alerted)
+    )
+    await db.commit()
+
+    progress = rate_limit_window_progress(info, now=now)
+    should_alert = (
+        status in RATE_LIMIT_ALERT_STATUSES
+        or (progress is not None and progress >= RATE_LIMIT_ALERT_FRACTION)
+    )
+    if not should_alert:
+        return
+    if resets_at is not None and already_alerted == resets_at:
+        return  # already said so for this window
+
+    await db.execute(
+        "UPDATE rate_limit_state SET alerted_for_resets_at = ? WHERE agent = ?",
+        (resets_at, agent)
+    )
+    await db.commit()
+
+    consumed = "in the warning band" if progress is None else f"{progress * 100:.0f}% through the window"
+    log.warning(f"{agent} rate-limit headroom low: status={status}, {consumed}")
+
+    channel_id = RATE_LIMIT_ALERT_CHANNEL_ID
+    if channel_id and channel_id != "0":
+        await post_to_discord(
+            agent, channel_id,
+            f"⚠️ `{agent}` rate-limit headroom low — status `{status}`, {consumed}."
+        )
+
+
+# =============================================================================
 # Attachments
 # =============================================================================
 
@@ -1034,6 +1225,17 @@ async def read_agent_response(
                 tools = event.get("tools")
                 if tools is not None:
                     log.info(f"{agent} session tools ({len(tools)}): {tools}")
+
+            # The CLI reports rate-limit headroom in-band, on the stream that
+            # is already open. Recorded rather than polled — see
+            # record_rate_limit_event. Wrapped because a bookkeeping failure
+            # must never cost the agent's actual reply, which is still
+            # arriving on this same loop.
+            if event_type == "rate_limit_event":
+                try:
+                    await record_rate_limit_event(agent, event.get("rate_limit_info"))
+                except Exception as e:
+                    log.error(f"Failed to record rate limit event for {agent}: {e}")
 
             # Claude Code stream-json output: each turn emits one or more
             # `assistant` events with content blocks (thinking/text/tool_use),
@@ -1507,6 +1709,44 @@ async def handle_cost(request):
 
     return web.json_response({"status": "recorded"})
 
+async def handle_usage(request):
+    """GET /usage - rate-limit headroom for every agent.
+
+    The counterpart to /cost. `/cost` answers "what has this spent"; this
+    answers "how close is it to being cut off", which is the number that
+    actually stops a turn mid-sentence.
+    """
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer ") or auth_header[7:] != AGENT_SERVER_TOKEN:
+        return web.json_response({"error": "Unauthorized"}, status=401)
+
+    async with db.execute("SELECT * FROM rate_limit_state") as cursor:
+        rows = {row["agent"]: row for row in await cursor.fetchall()}
+
+    agents = {}
+    for name in agent_config:
+        row = rows.get(name)
+        info = {
+            "resetsAt": row["resets_at"],
+            "rateLimitType": row["rate_limit_type"],
+        } if row else None
+        progress = rate_limit_window_progress(info) if info else None
+        agents[name] = {
+            "status": row["status"] if row else None,
+            "rate_limit_type": row["rate_limit_type"] if row else None,
+            "resets_at": row["resets_at"] if row else None,
+            "is_using_overage": bool(row["is_using_overage"]) if row else False,
+            "overage_status": row["overage_status"] if row else None,
+            # None, never 0 — "no reading yet" and "0% consumed" are opposite
+            # answers and must not render as the same number.
+            "percent_of_window_used": round(progress * 100, 1) if progress is not None else None,
+            "summary": format_usage_report(row),
+            "updated_at": row["updated_at"] if row else None,
+        }
+
+    return web.json_response({"agents": agents})
+
+
 async def handle_cost_get(request):
     """GET /cost/{agent} - Get cost summary"""
     # Check bearer token
@@ -1678,6 +1918,7 @@ def main():
     app.router.add_post("/agents/{name}/register", handle_agent_register)
     app.router.add_post("/cost", handle_cost)
     app.router.add_get("/cost/{agent}", handle_cost_get)
+    app.router.add_get("/usage", handle_usage)
 
     # Register startup/shutdown handlers
     app.on_startup.append(startup)

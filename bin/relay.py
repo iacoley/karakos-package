@@ -67,7 +67,7 @@ def split_discord_message(text: str, max_length: int = 2000) -> List[str]:
 # deliberately small: these three are the ones you need when an agent is
 # already too wedged to read its own messages, which is exactly when shell
 # access is least convenient.
-SYS_COMMANDS = frozenset({"clear", "reload", "status"})
+SYS_COMMANDS = frozenset({"clear", "reload", "status", "usage"})
 
 # <@123>, <@!123> (nickname form), <@&123> (role).
 _MENTION_RE = re.compile(r"<@[!&]?\d+>")
@@ -627,6 +627,13 @@ class DiscordAdapter(discord.Client):
             await self.sys_status(message)
             return
 
+        # Headroom is a whole-install question, not a per-agent one — every
+        # agent shares the same account's rate limit — so like /status it runs
+        # ahead of target resolution rather than demanding a target.
+        if cmd == "usage":
+            await self.sys_usage(message)
+            return
+
         agent, err = resolve_target_agent(mentioned, channel_default, agent_config.keys())
         if err:
             await self.sys_reply(message, err)
@@ -672,6 +679,31 @@ class DiscordAdapter(discord.Client):
                 f"{'alive' if info.get('alive') else 'not running'}, "
                 f"queue {info.get('queue_depth', 0)}"
             )
+        await self.sys_reply(message, "\n".join(lines))
+
+    async def sys_usage(self, message: discord.Message):
+        """Report rate-limit headroom — the limit that actually stops a turn."""
+        try:
+            async with self.http_session.get(
+                f"{AGENT_SERVER_URL}/usage",
+                headers={"Authorization": f"Bearer {AGENT_SERVER_TOKEN}"}
+            ) as resp:
+                if resp.status != 200:
+                    body = await resp.text()
+                    await self.sys_reply(message, f"agent server returned {resp.status}: {body[:200]}")
+                    return
+                usage = await resp.json()
+        except Exception as e:
+            await self.sys_reply(message, f"could not reach the agent server — {e}")
+            return
+
+        agents = usage.get("agents") or {}
+        if not agents:
+            await self.sys_reply(message, "No agents are configured.")
+            return
+
+        lines = [f"`{name}` — {(agents[name] or {}).get('summary', 'no reading')}"
+                 for name in sorted(agents)]
         await self.sys_reply(message, "\n".join(lines))
 
     async def agent_server_post(self, path: str):
