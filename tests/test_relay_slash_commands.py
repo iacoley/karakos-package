@@ -584,7 +584,7 @@ def _write_health(workspace, component, age_seconds):
 
 def test_health_reports_the_monitors_verdict_when_everything_is_fresh(
         relay, owner_install, health_workspace):
-    for component in ("mcp-tools.json", "relay.json", "memory.json", "scheduler.json"):
+    for component in ("mcp-tools.json", "relay.json", "memory-maintenance.json", "scheduler.json"):
         _write_health(health_workspace, component, age_seconds=1)
 
     adapter = make_adapter(relay, FakeHttpSession())
@@ -600,7 +600,7 @@ def test_health_reports_the_monitors_verdict_when_everything_is_fresh(
 def test_health_reports_a_stale_component(relay, owner_install, health_workspace):
     """The verdict has to be the monitor's own, thresholds and all — a stale
     relay heartbeat is the thing /health exists to surface."""
-    for component in ("mcp-tools.json", "memory.json", "scheduler.json"):
+    for component in ("mcp-tools.json", "memory-maintenance.json", "scheduler.json"):
         _write_health(health_workspace, component, age_seconds=1)
     _write_health(health_workspace, "relay.json", age_seconds=99999)
 

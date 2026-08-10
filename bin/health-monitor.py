@@ -10,7 +10,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from logging.handlers import RotatingFileHandler
 
 WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT", "/workspace"))
@@ -27,12 +27,18 @@ handler = RotatingFileHandler(
 handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
 log.addHandler(handler)
 
-# Component health thresholds (in seconds)
+# Component health thresholds (in seconds).
+#
+# Every key here must be a file some component actually writes. `memory.json`
+# sat in this table until 2026-08-09 and nothing had ever written it —
+# memory-maintenance.py writes `memory-maintenance.json` (docs/ARCHITECTURE.md
+# has always said so). A threshold naming a file with no writer is not a check;
+# it is a permanent "health file missing" that trains you to ignore the alert.
 THRESHOLDS = {
-    "mcp-tools.json": 600,       # 10 minutes
-    "relay.json": 300,            # 5 minutes
-    "memory.json": 172800,        # 48 hours
-    "scheduler.json": 300,        # 5 minutes
+    "mcp-tools.json": 600,            # 10 minutes
+    "relay.json": 300,                 # 5 minutes
+    "memory-maintenance.json": 172800, # 48 hours — only runs daily
+    "scheduler.json": 300,             # 5 minutes
 }
 
 def check_health_file(component: str, threshold: int) -> tuple[bool, str]:
@@ -51,7 +57,18 @@ def check_health_file(component: str, threshold: int) -> tuple[bool, str]:
             return False, f"{component} has no timestamp"
 
         timestamp = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
-        age = (datetime.now() - timestamp).total_seconds()
+        # Writers disagree about tzinfo and always have: scheduler.py and
+        # relay.py write naive local `datetime.now()`, while tools-server.py
+        # writes aware `datetime.now(timezone.utc)`. Subtracting one from the
+        # other raises TypeError, which the except below turned into
+        # "mcp-tools.json error: can't subtract offset-naive and offset-aware
+        # datetimes" — so a perfectly healthy MCP tools server reported
+        # unhealthy on every single run, and had since the aware writer landed.
+        # Normalise instead of trusting the writers to agree. A naive stamp is
+        # local time, which is what the naive writers mean by it.
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.astimezone()
+        age = (datetime.now(timezone.utc) - timestamp).total_seconds()
 
         if age > threshold:
             return False, f"{component} stale ({age/60:.1f} min, threshold {threshold/60:.1f} min)"
@@ -61,8 +78,14 @@ def check_health_file(component: str, threshold: int) -> tuple[bool, str]:
     except Exception as e:
         return False, f"{component} error: {e}"
 
-def poke_signals(message: str):
-    """Send alert to signals channel"""
+def poke_signals(message: str) -> bool:
+    """Send alert to signals channel. Returns True only if it actually sent.
+
+    The caller logs the outcome, so this has to report one. It used to swallow
+    the failure and return None, and main() then logged "Alert sent to signals
+    channel" unconditionally — the log claimed delivery on runs where nothing
+    was delivered, which is the one thing you go to that log to find out.
+    """
     try:
         subprocess.run(
             [
@@ -72,10 +95,24 @@ def poke_signals(message: str):
                 message
             ],
             check=True,
-            capture_output=True
+            capture_output=True,
+            # poke.sh talks to Discord. Without a timeout a hung request wedges
+            # the monitor forever, and this runs on a schedule.
+            timeout=30,
         )
+        return True
     except subprocess.CalledProcessError as e:
-        log.error(f"Failed to poke signals: {e}")
+        # capture_output already paid for stderr; not logging it throws away
+        # the only description of why the alert failed.
+        stderr = (e.stderr or b"").decode(errors="replace").strip()
+        log.error(f"Failed to poke signals (exit {e.returncode}): {stderr or e}")
+    except subprocess.TimeoutExpired:
+        log.error("Failed to poke signals: poke.sh timed out after 30s")
+    except OSError as e:
+        # Missing/non-executable poke.sh raises here, not CalledProcessError.
+        # Uncaught, it took down the whole monitor instead of one alert.
+        log.error(f"Failed to poke signals: cannot run poke.sh: {e}")
+    return False
 
 def verdict() -> dict:
     """The health verdict, as data. One implementation, two consumers.
@@ -112,8 +149,10 @@ def main():
 
     if issues:
         alert = "⚠️ Health check failures:\n" + "\n".join(f"• {issue}" for issue in issues)
-        poke_signals(alert)
-        log.info("Alert sent to signals channel")
+        if poke_signals(alert):
+            log.info("Alert sent to signals channel")
+        else:
+            log.error("Health check failed AND the alert could not be sent")
     else:
         log.info("All components healthy")
 
