@@ -1,0 +1,33 @@
+[Unit]
+Description=Karakos scheduler (cron-style task dispatch)
+After=network-online.target karakos-agent-server.service
+Wants=network-online.target
+BindsTo=karakos-agent-server.service
+
+[Service]
+Type=simple
+User=@@KARAKOS_USER@@
+Group=@@KARAKOS_USER@@
+
+WorkingDirectory=@@INSTALL_DIR@@
+Environment=HOME=@@INSTALL_DIR_PARENT@@
+Environment=WORKSPACE_ROOT=@@INSTALL_DIR@@
+EnvironmentFile=@@INSTALL_DIR@@/config/.env
+
+ExecStart=@@INSTALL_DIR@@/.venv/bin/python3 @@INSTALL_DIR@@/bin/scheduler.py
+
+Restart=always
+RestartSec=2
+RestartSteps=8
+RestartMaxDelaySec=300
+
+# Matches supervisord.conf's stopwaitsecs=5 for [program:scheduler].
+TimeoutStopSec=5
+KillSignal=SIGTERM
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=karakos-scheduler
+
+[Install]
+WantedBy=multi-user.target

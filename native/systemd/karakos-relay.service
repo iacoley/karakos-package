@@ -1,0 +1,38 @@
+[Unit]
+Description=Karakos relay (Discord I/O)
+After=network-online.target karakos-agent-server.service
+Wants=network-online.target
+BindsTo=karakos-agent-server.service
+
+[Service]
+Type=simple
+User=@@KARAKOS_USER@@
+Group=@@KARAKOS_USER@@
+
+WorkingDirectory=@@INSTALL_DIR@@
+Environment=HOME=@@INSTALL_DIR_PARENT@@
+Environment=WORKSPACE_ROOT=@@INSTALL_DIR@@
+EnvironmentFile=@@INSTALL_DIR@@/config/.env
+
+ExecStart=@@INSTALL_DIR@@/.venv/bin/python3 @@INSTALL_DIR@@/bin/relay.py
+
+# Amos's correction (2026-08-10): on-failure is wrong here. A clean Discord
+# gateway close / main() falling off the end is exit 0 — on-failure would
+# leave the unit dead with no restart and no failure signal. The container's
+# supervisord autorestart=true has the same "restart regardless of exit
+# reason" semantics; Restart=always is the faithful port of that.
+Restart=always
+RestartSec=2
+RestartSteps=8
+RestartMaxDelaySec=300
+
+# Matches supervisord.conf's stopwaitsecs=10 for [program:relay].
+TimeoutStopSec=10
+KillSignal=SIGTERM
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=karakos-relay
+
+[Install]
+WantedBy=multi-user.target

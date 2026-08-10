@@ -1,0 +1,47 @@
+[Unit]
+Description=Karakos agent-server (LLM subprocess host)
+# No PTY/tmux needed here — start_agent_subprocess() in bin/agent-server.py
+# talks to the Claude Code CLI over stdin/stdout pipes (stream-json), not a
+# terminal. Confirmed 2026-08-10 by reading agent-server.py directly before
+# assuming Amos's tmux-owned-by-systemd pattern was needed.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@@KARAKOS_USER@@
+Group=@@KARAKOS_USER@@
+
+WorkingDirectory=@@INSTALL_DIR@@
+Environment=HOME=@@INSTALL_DIR_PARENT@@
+Environment=WORKSPACE_ROOT=@@INSTALL_DIR@@
+EnvironmentFile=@@INSTALL_DIR@@/config/.env
+
+# Absolute interpreter + script path — no shell, so no venv activate.
+ExecStart=@@INSTALL_DIR@@/.venv/bin/python3 @@INSTALL_DIR@@/bin/agent-server.py
+
+# Deliberately excluded from the auto-reload-on-commit hook (same as the
+# container setup) — this is the process that would be delivering a live
+# reply when a commit lands. Bouncing needs to be a deliberate act (a
+# reload_agent admin call, or a fresh turn), not a side effect of a commit.
+# See system/reload-on-commit.py's SELF_PROCESS_WARN for the container-side
+# version of this same rule.
+Restart=always
+RestartSec=2
+
+# Amos's backoff correction (2026-08-10): a naive Restart=always retries at
+# a fixed interval forever, so a hard-down dependency at boot becomes an
+# infinite tight loop in the journal. This bounds it without ever parking
+# the unit in `failed` (which would sit dead until a human notices).
+RestartSteps=8
+RestartMaxDelaySec=300
+
+TimeoutStopSec=45
+KillSignal=SIGTERM
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=karakos-agent-server
+
+[Install]
+WantedBy=multi-user.target

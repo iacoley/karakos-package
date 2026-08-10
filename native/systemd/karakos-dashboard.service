@@ -1,0 +1,51 @@
+[Unit]
+Description=Karakos dashboard (Next.js standalone server)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@@KARAKOS_USER@@
+Group=@@KARAKOS_USER@@
+
+WorkingDirectory=@@INSTALL_DIR@@/dashboard
+Environment=HOME=@@INSTALL_DIR_PARENT@@
+Environment=PORT=@@DASHBOARD_PORT@@
+EnvironmentFile=@@INSTALL_DIR@@/config/.env
+
+# `next start` does not work with `output: standalone` (next.config.ts) —
+# it ignores the trimmed standalone bundle and warns on every start. To
+# rebuild after code changes: cd dashboard && npm run build, then
+# `systemctl restart karakos-dashboard`. Same manual-rebuild requirement as
+# the container had; native doesn't remove that step.
+ExecStart=/usr/bin/node @@INSTALL_DIR@@/dashboard/.next/standalone/server.js
+
+# Amos's port-reclamation correction (2026-08-10): npm/node spawns
+# next-server as a child. Docker gave us free cleanup here because the
+# whole container's process tree died together on stop. Natively, killing
+# just the parent leaves the child holding the port, and the next restart
+# crash-loops on EADDRINUSE. KillMode=mixed reaps the whole cgroup; the
+# ExecStartPre is a deterministic guard for anything that slips through
+# (leading "-" means a nonzero exit here, e.g. nothing was listening,
+# doesn't fail the unit).
+KillMode=mixed
+ExecStartPre=-/usr/bin/fuser -k @@DASHBOARD_PORT@@/tcp
+
+# A clean exit here plausibly does mean "should stay stopped" rather than
+# "crashed" (per Amos — keep on-failure for dashboard specifically, unlike
+# the always-on relay/scheduler/agent-server/recovery-agent). Revisit if
+# that assumption turns out wrong in practice.
+Restart=on-failure
+RestartSec=2
+RestartSteps=8
+RestartMaxDelaySec=300
+
+TimeoutStopSec=10
+KillSignal=SIGTERM
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=karakos-dashboard
+
+[Install]
+WantedBy=multi-user.target
