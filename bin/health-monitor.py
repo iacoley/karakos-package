@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import subprocess
+import sys
 import time
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -76,17 +77,38 @@ def poke_signals(message: str):
     except subprocess.CalledProcessError as e:
         log.error(f"Failed to poke signals: {e}")
 
+def verdict() -> dict:
+    """The health verdict, as data. One implementation, two consumers.
+
+    The scheduled run below pokes the signals channel with it; `--check`
+    prints it as JSON for bin/relay.py's `/health` slash command. Computing
+    it twice is how the alert and the command start disagreeing about
+    whether the system is up.
+    """
+    issues = []
+    components = {}
+    for component, threshold in THRESHOLDS.items():
+        ok, reason = check_health_file(component, threshold)
+        components[component] = {"healthy": ok, "reason": reason}
+        if not ok:
+            issues.append(reason)
+    return {"healthy": not issues, "issues": issues, "components": components}
+
+
 def main():
     """Check all components and alert on issues"""
+    if "--check" in sys.argv:
+        # Read-only: no alert is sent, so an operator asking "is it healthy"
+        # cannot spam the signals channel by asking twice.
+        print(json.dumps(verdict()))
+        return
+
     log.info("Running health monitor")
 
-    issues = []
-
-    for component, threshold in THRESHOLDS.items():
-        healthy, reason = check_health_file(component, threshold)
-        if not healthy:
-            log.warning(f"Health check failed: {reason}")
-            issues.append(reason)
+    result = verdict()
+    issues = result["issues"]
+    for reason in issues:
+        log.warning(f"Health check failed: {reason}")
 
     if issues:
         alert = "⚠️ Health check failures:\n" + "\n".join(f"• {issue}" for issue in issues)

@@ -124,6 +124,10 @@ response_buffers: Dict[str, str] = {}
 agent_last_cost: Dict[str, float] = {}
 agent_sessions: Dict[str, str] = {}
 stderr_reader_tasks: Dict[str, asyncio.Task] = {}
+# Agents whose current turn was deliberately ended by /interrupt. Read (and
+# cleared) by read_agent_response so the half-written reply is discarded
+# instead of posted.
+interrupted_agents: set = set()
 typing_tasks: Dict[str, asyncio.Task] = {}
 agent_todo_lists: Dict[str, List[Dict]] = {}
 active_todo_messages: Dict[str, Dict] = {}
@@ -601,6 +605,58 @@ async def reload_agent(agent: str):
     agent_last_cost.pop(agent, None)
     response_buffers[agent] = ""
     await start_agent_subprocess(agent)
+
+
+async def interrupt_agent(agent: str) -> bool:
+    """Stop an in-flight generation, keeping the session. Returns whether
+    there was anything to stop.
+
+    There is no "stop" message in Claude Code's stream-json protocol, so the
+    only way to end a turn that is already running is to end the process
+    carrying it. Killing it makes the `readline()` inside read_agent_response
+    return EOF, which unwinds the turn, releases the agent's lock, and leaves
+    the state IDLE — so the next message is picked up normally by the same
+    path any message uses. The respawn resumes the same session_id, so the
+    conversation survives.
+
+    `interrupted_agents` marks the turn as abandoned: without it the partial
+    text that had accumulated before the kill would be posted to Discord as
+    if it were the answer, which is the opposite of what "interrupt" means.
+    """
+    if agent_states.get(agent) != "PROCESSING":
+        return False
+
+    log.info(f"Interrupting {agent} (session preserved)")
+    interrupted_agents.add(agent)
+    await kill_agent_subprocess(agent)
+    agent_last_cost.pop(agent, None)
+    response_buffers[agent] = ""
+    await start_agent_subprocess(agent)
+    return True
+
+
+async def flush_agent_queue(agent: str) -> int:
+    """Drop every message still waiting for `agent`. Returns how many.
+
+    In-progress messages are left alone: they are already inside the
+    subprocess and deleting the row would only lose the record of them.
+    """
+    async with db.execute(
+        "SELECT COUNT(*) as count FROM message_queue WHERE agent = ? AND processed = ?",
+        (agent, STATUS_QUEUED),
+    ) as cursor:
+        row = await cursor.fetchone()
+        pending = row["count"]
+
+    if pending:
+        await db.execute(
+            "UPDATE message_queue SET processed = ? WHERE agent = ? AND processed = ?",
+            (STATUS_SKIPPED, agent, STATUS_QUEUED),
+        )
+        await db.commit()
+
+    log.info(f"Flushed {pending} queued message(s) for {agent}")
+    return pending
 
 # =============================================================================
 # Cost Tracking
@@ -1381,6 +1437,15 @@ async def read_agent_response(
     # Strip any inline thinking blocks (defense in depth)
     final_text = THINKING_BLOCK_RE.sub("", final_text).strip()
 
+    # A turn that /interrupt ended has no answer, only a fragment of one.
+    # Returning it would post half a sentence to the channel and bill it as
+    # the reply — so it is dropped here, at the single point every caller of
+    # read_agent_response goes through.
+    if agent in interrupted_agents:
+        interrupted_agents.discard(agent)
+        log.info(f"{agent} turn discarded (interrupted)")
+        final_text, metadata = "", {}
+
     agent_states[agent] = "IDLE"
     write_agent_beacon(agent, "IDLE", force=True)
     return final_text, metadata
@@ -1716,6 +1781,54 @@ async def handle_agent_reload(request):
     return web.json_response({"status": "reloaded"})
 
 
+async def handle_agent_interrupt(request):
+    """POST /agents/{name}/interrupt - Stop the current generation."""
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer ") or auth_header[7:] != AGENT_SERVER_TOKEN:
+        return web.json_response({"error": "Unauthorized"}, status=401)
+
+    agent = request.match_info.get("name")
+    if agent not in agent_config:
+        return web.json_response({"error": "Unknown agent"}, status=404)
+
+    interrupted = await interrupt_agent(agent)
+    # 200 either way: "it was already idle" is a successful answer to
+    # "stop what you are doing", and the relay says which one happened.
+    return web.json_response({
+        "status": "interrupted" if interrupted else "idle",
+        "interrupted": interrupted,
+    })
+
+
+async def handle_agent_kill(request):
+    """POST /agents/{name}/kill - Kill the subprocess without respawning it."""
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer ") or auth_header[7:] != AGENT_SERVER_TOKEN:
+        return web.json_response({"error": "Unauthorized"}, status=401)
+
+    agent = request.match_info.get("name")
+    if agent not in agent_config:
+        return web.json_response({"error": "Unknown agent"}, status=404)
+
+    was_running = agent in agent_processes
+    await kill_agent_subprocess(agent)
+    return web.json_response({"status": "killed", "was_running": was_running})
+
+
+async def handle_agent_flush(request):
+    """POST /agents/{name}/flush - Drop the agent's pending message queue."""
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer ") or auth_header[7:] != AGENT_SERVER_TOKEN:
+        return web.json_response({"error": "Unauthorized"}, status=401)
+
+    agent = request.match_info.get("name")
+    if agent not in agent_config:
+        return web.json_response({"error": "Unknown agent"}, status=404)
+
+    flushed = await flush_agent_queue(agent)
+    return web.json_response({"status": "flushed", "flushed": flushed})
+
+
 # Agent name validator — same surface as bin/create-agent.sh's check, used
 # to reject path traversal / shell metachars before we touch disk.
 _AGENT_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
@@ -2002,12 +2115,15 @@ async def shutdown(app):
 # Main
 # =============================================================================
 
-def main():
-    """Main entry point"""
-    # Signal handlers will be registered after event loop starts (in startup)
-    # For now, just set flag to handle in asyncio context
+def create_app(with_lifecycle: bool = True) -> web.Application:
+    """Build the aiohttp app — the server's whole routing surface.
 
-    # Create app
+    Split out of main() so tests can drive the real route table over real
+    HTTP. A test that calls a handler directly proves the handler works and
+    says nothing about whether the URL reaches it, which is the half that
+    breaks. `with_lifecycle=False` skips the startup/shutdown hooks (sqlite,
+    subprocess spawning, signal handlers) that a route test supplies itself.
+    """
     app = web.Application()
 
     # Register routes
@@ -2017,16 +2133,26 @@ def main():
     app.router.add_post("/agents/{name}/reset", handle_agent_reset)
     app.router.add_post("/agents/{name}/reload", handle_agent_reload)
     app.router.add_post("/agents/{name}/register", handle_agent_register)
+    app.router.add_post("/agents/{name}/interrupt", handle_agent_interrupt)
+    app.router.add_post("/agents/{name}/kill", handle_agent_kill)
+    app.router.add_post("/agents/{name}/flush", handle_agent_flush)
     app.router.add_post("/cost", handle_cost)
     app.router.add_get("/cost/{agent}", handle_cost_get)
     app.router.add_get("/usage", handle_usage)
 
     # Register startup/shutdown handlers
-    app.on_startup.append(startup)
-    app.on_shutdown.append(shutdown)
+    if with_lifecycle:
+        app.on_startup.append(startup)
+        app.on_shutdown.append(shutdown)
 
-    # Run server
-    web.run_app(app, host="0.0.0.0", port=PORT, access_log=None)
+    return app
+
+
+def main():
+    """Main entry point"""
+    # Signal handlers will be registered after event loop starts (in startup)
+    # For now, just set flag to handle in asyncio context
+    web.run_app(create_app(), host="0.0.0.0", port=PORT, access_log=None)
 
 if __name__ == "__main__":
     main()

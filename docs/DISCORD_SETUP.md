@@ -129,6 +129,41 @@ Two rules apply to every bot regardless of that key:
 
 Set `GUEST_TURN_LIMIT` in `config/.env` to change the cap.
 
+## Operational Commands
+
+These are real Discord application commands: type `/` in any channel the bot
+can see and they appear in the picker with descriptions. They are registered
+on every container start by `bin/register-discord-commands.py` and dispatched
+by the relay itself, not by an agent — which is the point, because the case
+you need them in is an agent too wedged to read its own messages.
+
+**Every one of them is owner-only.** They are gated on `OWNER_DISCORD_ID`
+(step 6 above); an install that never set it denies everyone, including you.
+
+| Command | What it does |
+| --- | --- |
+| `/status` | Each agent's state, whether its subprocess is alive, queue depth |
+| `/health` | The health monitor's verdict, component by component |
+| `/usage` | Rate-limit headroom — the limit that actually stops a turn |
+| `/cost [agent]` | Today's and this month's spend, same numbers as `bin/cost-report.sh` |
+| `/logs <service> [lines]` | Tail a log from `logs/`, e.g. `/logs relay 40` |
+| `/interrupt [agent]` | Stop the generation in flight; the session survives |
+| `/reload [agent]` | Bounce the subprocess, keep the session |
+| `/clear [agent]` | Clear the session and restart — destructive |
+| `/kill [agent]` | Kill the subprocess and leave it down |
+| `/flush [agent]` | Drop the agent's pending message queue |
+| `/help` | List the commands |
+
+`agent` is optional everywhere it appears: with one agent configured it is
+inferred, and in a channel with a `default_agent` that agent is used. With
+several agents and no default, the command refuses rather than guessing —
+clearing the wrong agent's session is not recoverable and is invisible to the
+person who typed it.
+
+`/clear`, `/reload`, `/status` and `/usage` are additionally accepted as plain
+message text (`/clear`, or the older `/sys clear`), for the case where the
+picker itself is unavailable.
+
 ## Troubleshooting
 
 **Bot appears offline:**

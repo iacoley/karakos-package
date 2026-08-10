@@ -17,11 +17,11 @@ Reads DISCORD_BOT_TOKEN_PRIMARY, DISCORD_BOT_ID_PRIMARY, and
 DISCORD_SERVER_ID from the environment -- already present inside the
 container via config/.env (see config/.env.template).
 
-These commands mirror the ones already implemented in the `kara` CLI REPL
-(bin/kara) so users can discover them from the "/" picker in Discord too.
-Wiring an interaction handler that makes them actually *do* something when
-invoked from Discord (as opposed to the CLI) is a separate piece of work
-(#86) -- this script only makes them show up.
+Every command here is dispatched by `DiscordAdapter.on_interaction` in
+bin/relay.py, which routes it into the same `handle_sys_command` the text
+intercept uses. The relay keeps a matching `SLASH_COMMANDS` set: a name
+registered here with no entry there is a command that silently does nothing,
+and tests/test_relay_slash_commands.py fails the build if the two drift.
 """
 
 import argparse
@@ -35,6 +35,7 @@ import urllib.request
 API = os.environ.get("KARAKOS_DISCORD_API_BASE", "https://discord.com/api/v10")
 
 STRING = 3
+INTEGER = 4
 
 AGENT_OPTION = {
     "name": "agent",
@@ -51,16 +52,32 @@ def _cmd(name, description, options=None):
     return c
 
 
+# Option values are reassembled into the free-text `args` string that
+# bin/relay.py's `handle_sys_command` branches already parse (see
+# `slash_args` there), so the slash surface and the text surface stay one
+# implementation rather than two that drift.
 COMMANDS = [
-    _cmd("health", "Server + agent status"),
-    _cmd("agents", "List configured agents"),
-    _cmd("agent", "Switch the active agent", [
-        {"name": "name", "description": "Agent name", "type": STRING, "required": True},
-    ]),
-    _cmd("cost", "Cost summary for an agent", [AGENT_OPTION]),
-    _cmd("reset", "Reset an agent's session (destructive)", [AGENT_OPTION]),
-    _cmd("reload", "Bounce an agent's subprocess, preserve session", [AGENT_OPTION]),
+    # --- whole-install, no target agent ---
+    _cmd("status", "Agent + subprocess state and queue depth"),
+    _cmd("health", "Health-monitor verdict for every component"),
+    _cmd("usage", "Account usage vs rate-limit headroom"),
     _cmd("help", "List available commands"),
+
+    # --- agent-targeted ---
+    _cmd("cost", "Today's and this month's spend for an agent", [AGENT_OPTION]),
+    _cmd("clear", "Clear an agent's session and restart it (destructive)", [AGENT_OPTION]),
+    _cmd("reload", "Bounce an agent's subprocess, preserve session", [AGENT_OPTION]),
+    _cmd("interrupt", "Stop an agent's current generation, keep the session", [AGENT_OPTION]),
+    _cmd("kill", "Kill an agent's subprocess without respawning it", [AGENT_OPTION]),
+    _cmd("flush", "Drop an agent's pending message queue", [AGENT_OPTION]),
+
+    # --- shaped arguments ---
+    _cmd("logs", "Tail a service log", [
+        {"name": "service", "description": "Log name, e.g. relay or agent-server",
+         "type": STRING, "required": True},
+        {"name": "lines", "description": "How many lines (default 40, max 200)",
+         "type": INTEGER, "required": False},
+    ]),
 ]
 
 

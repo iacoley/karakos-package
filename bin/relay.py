@@ -15,10 +15,12 @@ import logging
 import os
 import re
 import subprocess
+import sys
 import textwrap
 import time
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Optional, Dict, List
 from logging.handlers import RotatingFileHandler
 
@@ -69,8 +71,57 @@ def split_discord_message(text: str, max_length: int = 2000) -> List[str]:
 # access is least convenient.
 SYS_COMMANDS = frozenset({"clear", "reload", "status", "usage"})
 
+# Commands registered as real Discord application commands by
+# bin/register-discord-commands.py and dispatched by
+# `DiscordAdapter.on_interaction`. This is deliberately a superset of
+# SYS_COMMANDS: an application command arrives already distinguished from a
+# sentence, so it costs nothing to expose, while every name added to
+# SYS_COMMANDS is one more word the relay swallows out of ordinary chat.
+#
+# Keep in step with COMMANDS in bin/register-discord-commands.py. A name here
+# with no registration is unreachable; a registration with no name here is
+# dropped by on_interaction. tests/test_relay_slash_commands.py fails the
+# build on either.
+SLASH_COMMANDS = frozenset({
+    "status", "health", "usage", "help",
+    "cost", "clear", "reload", "interrupt", "kill", "flush",
+    "logs",
+})
+
+# Commands that report on the whole install rather than one agent, so they
+# neither need nor accept a target and must not be blocked by "which agent?".
+UNTARGETED_COMMANDS = frozenset({"status", "health", "usage", "help", "logs"})
+
+# /logs — a service name becomes a path segment under logs/, so it is
+# validated rather than sanitised: `..` and `/` have no valid form here.
+_LOG_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+LOG_LINES_DEFAULT = 40
+# Discord's own ceiling is 2000 characters per message and split_discord_message
+# will chunk beyond that; this stops one command from producing twenty posts.
+LOG_LINES_MAX = 200
+
 # <@123>, <@!123> (nickname form), <@&123> (role).
 _MENTION_RE = re.compile(r"<@[!&]?\d+>")
+
+
+def slash_args(cmd: str, options: Dict) -> str:
+    """Rebuild the free-text `args` string a `handle_sys_command` branch parses.
+
+    Slash commands arrive as typed options; every branch of the handler was
+    written against a string, and the text surface still delivers one.
+    Reassembling here keeps one implementation instead of two, at the cost of
+    this small translation table.
+    """
+    def s(key: str) -> str:
+        value = (options or {}).get(key)
+        return "" if value is None else str(value).strip()
+
+    if cmd == "logs":
+        return " ".join(p for p in (s("service"), s("lines")) if p)
+    # Everything else is either untargeted or agent-targeted, and the target
+    # travels as `mentioned` (the same slot a text-path @mention fills), not
+    # as args — so there is nothing left to rebuild.
+    return ""
 
 
 def strip_mentions(text: str) -> str:
@@ -592,6 +643,78 @@ class DiscordAdapter(discord.Client):
                 log.error(f"Failed to post guest-limit notice: {e}")
         return False
 
+    async def on_interaction(self, interaction: discord.Interaction):
+        """Dispatch a registered Discord application ("slash") command.
+
+        This is the entry point for every `/` command in the picker. It
+        delegates to the same `handle_sys_command` the text intercept uses,
+        so the two surfaces cannot drift apart, and command *definitions*
+        live in bin/register-discord-commands.py rather than here:
+        discord.py's CommandTree wants a Bot/tree it owns, and this relay
+        runs a bare `discord.Client`. Registering over the REST API keeps
+        that arrangement at the cost of one script run per definition change
+        (entrypoint.sh already makes that run on every container start).
+        """
+        data = getattr(interaction, "data", None) or {}
+        name = data.get("name", "")
+
+        # Logged before any filter. A command that reaches the gateway and is
+        # dropped here looks identical, from Discord's side, to one that never
+        # arrived — and that ambiguity is unresolvable after the fact.
+        log.info(
+            "[interaction] type=%s name=%r user=%s",
+            getattr(interaction, "type", None), name,
+            getattr(getattr(interaction, "user", None), "id", None),
+        )
+
+        if getattr(interaction, "type", None) != discord.InteractionType.application_command:
+            return
+        if name not in SLASH_COMMANDS:
+            log.warning("[interaction] dropped: %r is not a known slash command", name)
+            return
+
+        # Every reply this handler produces goes to a channel. Without a
+        # channel there is nowhere to say "permission denied" or "done", and
+        # the command would fail with a traceback in the log and total silence
+        # in Discord — the exact symptom #86 was filed over.
+        if getattr(interaction, "channel", None) is None:
+            log.warning("[interaction] dropped /%s: no channel on the interaction", name)
+            return
+
+        options = {o["name"]: o.get("value") for o in (data.get("options") or [])}
+        args = slash_args(name, options)
+
+        # Acknowledge inside Discord's 3s deadline. /clear and /interrupt kill
+        # and respawn a subprocess and blow straight through it; without an
+        # early ack the user sees "the application did not respond" while the
+        # command is in fact working. The real output still lands in-channel
+        # via sys_reply, same as the text path.
+        try:
+            await interaction.response.send_message(
+                f"`[SYS]` running `/{name} {args}`".strip(), ephemeral=True
+            )
+        except Exception as e:
+            log.warning("[interaction] ack failed for /%s: %s", name, e)
+
+        channel_name = self.get_channel_name(str(getattr(interaction.channel, "id", "")))
+        channel_default = None
+        if channel_name:
+            channel_default = (channels_config.get("channels", {})
+                               .get(channel_name, {}) or {}).get("default_agent")
+
+        # handle_sys_command reads .channel, .author and .content off a
+        # message. An interaction carries all three under different names;
+        # shim it rather than fork the handler.
+        shim = SimpleNamespace(
+            id=getattr(interaction, "id", 0),
+            channel=interaction.channel,
+            author=interaction.user,
+            guild=getattr(interaction, "guild", None),
+            content=f"/{name} {args}".strip(),
+        )
+        mentioned = (options.get("agent") or "").strip() or None
+        await self.handle_sys_command(shim, name, args, mentioned, channel_default)
+
     async def sys_reply(self, message: discord.Message, text: str):
         """Answer a system command in the channel it was typed in."""
         try:
@@ -623,15 +746,20 @@ class DiscordAdapter(discord.Client):
             log.warning(f"[SYS] denied /{cmd} from {author}")
             return
 
-        if cmd == "status":
-            await self.sys_status(message)
-            return
-
-        # Headroom is a whole-install question, not a per-agent one — every
-        # agent shares the same account's rate limit — so like /status it runs
-        # ahead of target resolution rather than demanding a target.
-        if cmd == "usage":
-            await self.sys_usage(message)
+        # Whole-install questions run ahead of target resolution rather than
+        # demanding a target: headroom, health and log tails are not per-agent
+        # facts, and asking "which agent?" about them is a dead end.
+        if cmd in UNTARGETED_COMMANDS:
+            if cmd == "status":
+                await self.sys_status(message)
+            elif cmd == "usage":
+                await self.sys_usage(message)
+            elif cmd == "health":
+                await self.sys_health(message)
+            elif cmd == "logs":
+                await self.sys_logs(message, args)
+            elif cmd == "help":
+                await self.sys_help(message)
             return
 
         agent, err = resolve_target_agent(mentioned, channel_default, agent_config.keys())
@@ -649,6 +777,34 @@ class DiscordAdapter(discord.Client):
             await self.sys_reply(
                 message,
                 f"`{agent}` reloaded, session preserved." if ok else f"reload failed for `{agent}` — {detail}")
+        elif cmd == "interrupt":
+            ok, detail, body = await self.agent_server_post_json(f"/agents/{agent}/interrupt")
+            if not ok:
+                await self.sys_reply(message, f"interrupt failed for `{agent}` — {detail}")
+            elif body.get("interrupted"):
+                await self.sys_reply(message, f"`{agent}` interrupted, session preserved.")
+            else:
+                # Distinguishing these two matters: "stopped it" and "there was
+                # nothing running" look identical from the channel otherwise,
+                # and the second one means your interrupt arrived too late.
+                await self.sys_reply(message, f"`{agent}` was not generating — nothing to interrupt.")
+        elif cmd == "kill":
+            ok, detail, body = await self.agent_server_post_json(f"/agents/{agent}/kill")
+            if not ok:
+                await self.sys_reply(message, f"kill failed for `{agent}` — {detail}")
+            else:
+                await self.sys_reply(
+                    message,
+                    f"`{agent}` subprocess killed." if body.get("was_running")
+                    else f"`{agent}` had no subprocess running.")
+        elif cmd == "flush":
+            ok, detail, body = await self.agent_server_post_json(f"/agents/{agent}/flush")
+            await self.sys_reply(
+                message,
+                f"`{agent}` queue flushed — {body.get('flushed', 0)} message(s) dropped."
+                if ok else f"flush failed for `{agent}` — {detail}")
+        elif cmd == "cost":
+            await self.sys_cost(message, agent)
 
     async def sys_status(self, message: discord.Message):
         """Report each agent's state, liveness and queue depth."""
@@ -706,19 +862,167 @@ class DiscordAdapter(discord.Client):
                  for name in sorted(agents)]
         await self.sys_reply(message, "\n".join(lines))
 
+    async def sys_health(self, message: discord.Message):
+        """Report the health-monitor's verdict, component by component.
+
+        Shelling out to bin/health-monitor.py --check rather than
+        reimplementing the thresholds here is the point: an operator asking
+        "is it healthy" must get the same answer the scheduled alert would
+        give, or one of the two is lying.
+        """
+        script = WORKSPACE_ROOT / "bin" / "health-monitor.py"
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable, str(script), "--check",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                # Passed explicitly, not inherited: the monitor resolves its
+                # health directory from WORKSPACE_ROOT at import time, and a
+                # child that disagrees with the relay about where that is
+                # reports a perfectly healthy empty directory.
+                env={**os.environ, "WORKSPACE_ROOT": str(WORKSPACE_ROOT)},
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=20)
+        except asyncio.TimeoutError:
+            await self.sys_reply(message, "health check timed out after 20s.")
+            return
+        except Exception as e:
+            await self.sys_reply(message, f"could not run the health monitor — {e}")
+            return
+
+        if proc.returncode != 0:
+            await self.sys_reply(
+                message,
+                f"health monitor exited {proc.returncode}: {stderr.decode(errors='replace')[:200]}")
+            return
+
+        try:
+            report = json.loads(stdout.decode())
+        except (ValueError, UnicodeDecodeError) as e:
+            await self.sys_reply(message, f"health monitor returned unreadable output — {e}")
+            return
+
+        components = report.get("components") or {}
+        lines = ["All components healthy." if report.get("healthy") else "Health check failures:"]
+        for name in sorted(components):
+            info = components[name] or {}
+            lines.append(f"`{name}` — {'ok' if info.get('healthy') else info.get('reason') or 'unhealthy'}")
+        await self.sys_reply(message, "\n".join(lines))
+
+    async def sys_cost(self, message: discord.Message, agent: str):
+        """Today's and this month's spend for one agent.
+
+        Reads the same GET /cost/{agent} endpoint bin/cost-report.sh curls,
+        so the channel and the CLI cannot report different numbers.
+        """
+        try:
+            async with self.http_session.get(
+                f"{AGENT_SERVER_URL}/cost/{agent}",
+                headers={"Authorization": f"Bearer {AGENT_SERVER_TOKEN}"}
+            ) as resp:
+                if resp.status != 200:
+                    body = await resp.text()
+                    await self.sys_reply(message, f"agent server returned {resp.status}: {body[:200]}")
+                    return
+                report = await resp.json()
+        except Exception as e:
+            await self.sys_reply(message, f"could not reach the agent server — {e}")
+            return
+
+        await self.sys_reply(
+            message,
+            f"`{agent}` — today ${report.get('daily', 0.0):.2f}, "
+            f"month ${report.get('monthly', 0.0):.2f}, "
+            f"session ${report.get('session', 0.0):.2f}"
+        )
+
+    async def sys_logs(self, message: discord.Message, args: str):
+        """Tail a service log into the channel.
+
+        The service name becomes a path segment, so it is validated against a
+        character class and then resolved and re-checked against the logs
+        directory. A rejected name is answered with the names that would have
+        worked — a bare "no" leaves you guessing at a filename.
+        """
+        parts = (args or "").split()
+        service = parts[0] if parts else ""
+        available = sorted(p.stem for p in (WORKSPACE_ROOT / "logs").glob("*.log")) \
+            if (WORKSPACE_ROOT / "logs").is_dir() else []
+        choices = ", ".join(f"`{n}`" for n in available) or "none found"
+
+        if not service:
+            await self.sys_reply(message, f"Usage: `/logs <service> [lines]`. Available: {choices}")
+            return
+
+        lines_wanted = LOG_LINES_DEFAULT
+        if len(parts) > 1:
+            try:
+                lines_wanted = int(parts[1])
+            except ValueError:
+                await self.sys_reply(message, f"`{parts[1]}` is not a number of lines.")
+                return
+            lines_wanted = max(1, min(lines_wanted, LOG_LINES_MAX))
+
+        if not _LOG_NAME_RE.match(service):
+            await self.sys_reply(message, f"Unknown log `{service}`. Available: {choices}")
+            return
+
+        logs_dir = (WORKSPACE_ROOT / "logs").resolve()
+        path = (logs_dir / f"{service}.log").resolve()
+        # Belt and braces: the regex already excludes `/` and `..`, but a
+        # symlink inside logs/ is not something the name can reveal.
+        if path.parent != logs_dir or not path.is_file():
+            await self.sys_reply(message, f"Unknown log `{service}`. Available: {choices}")
+            return
+
+        try:
+            tail = path.read_text(errors="replace").splitlines()[-lines_wanted:]
+        except OSError as e:
+            await self.sys_reply(message, f"could not read `{service}.log` — {e}")
+            return
+
+        if not tail:
+            await self.sys_reply(message, f"`{service}.log` is empty.")
+            return
+
+        body = "\n".join(tail)
+        await self.sys_reply(message, f"last {len(tail)} line(s) of `{service}.log`:\n```\n{body}\n```")
+
+    async def sys_help(self, message: discord.Message):
+        """List the commands this relay actually dispatches."""
+        await self.sys_reply(
+            message,
+            "Commands: " + ", ".join(f"`/{c}`" for c in sorted(SLASH_COMMANDS))
+        )
+
     async def agent_server_post(self, path: str):
         """POST to the agent server. Returns (ok, detail-on-failure)."""
+        ok, detail, _body = await self.agent_server_post_json(path)
+        return ok, detail
+
+    async def agent_server_post_json(self, path: str):
+        """POST to the agent server. Returns (ok, detail-on-failure, body).
+
+        `body` is always a dict so callers can `.get()` unconditionally — an
+        endpoint that reports *what it did* (interrupted vs already idle,
+        how many messages were flushed) is useless if reading that answer
+        needs a None check at every call site.
+        """
         try:
             async with self.http_session.post(
                 f"{AGENT_SERVER_URL}{path}",
                 headers={"Authorization": f"Bearer {AGENT_SERVER_TOKEN}"}
             ) as resp:
                 if resp.status == 200:
-                    return True, ""
+                    try:
+                        body = await resp.json()
+                    except Exception:
+                        body = None
+                    return True, "", body if isinstance(body, dict) else {}
                 body = await resp.text()
-                return False, f"agent server returned {resp.status}: {body[:200]}"
+                return False, f"agent server returned {resp.status}: {body[:200]}", {}
         except Exception as e:
-            return False, str(e)
+            return False, str(e), {}
 
     def get_channel_name(self, channel_id: str) -> Optional[str]:
         """Get channel name from ID"""
