@@ -164,6 +164,35 @@ JSON-RPC 2.0 server over stdin/stdout. Provides tools to Claude agents:
 - `discord` — Read-only Discord access (channels, history)
 - `taskboard` — Task tracking
 - `vault` — Git-backed knowledge store
+- `ask_user` — Put a multiple-choice question to the user and block on the answer
+
+### Asking the user a question (`bin/ask_handler.py`)
+
+Claude Code's built-in `AskUserQuestion` tool does not exist over this
+transport: agents run as `claude -p --input-format stream-json`, and in that
+mode the CLI leaves the tool out of the session's tool list entirely, even
+with `--allowedTools AskUserQuestion`. There is nothing to intercept in the
+output stream, so the bridge is a replacement tool rather than an adapter.
+
+```
+agent → ask_user (MCP)  ──POST /ask──▶  agent server ──▶ Discord embed + buttons
+              ▲                              ▲                      │
+              │                              │                   click
+        poll GET /ask/{id}          POST /ask/{id}/answer ◀── relay (gateway)
+```
+
+- `bin/ask_handler.py` owns the payload shape and the registry state machine.
+  No I/O, so all three processes can share it.
+- The agent server posts the question into the channel the current turn came
+  from, under the **relay's** bot token — a component interaction is
+  delivered only to the application that sent the message, and the relay
+  holds the one gateway connection.
+- Only the people whose messages started the turn (plus the owner) can
+  answer; the answer is fed straight back into the agent's context.
+- While a question is outstanding the agent's beacon reads `AWAITING_USER`,
+  which `bin/wedge-check.py` does not treat as an active turn — a person
+  taking four minutes to decide is not a wedged agent. It flips back to
+  `PROCESSING` the moment the question resolves or expires.
 
 ### Skill Discovery
 Scans `skills/*/tools.json` at startup. Each skill provides tool definitions and implementation scripts. Tools are dispatched to skill scripts via subprocess with `TOOL_ARGS` environment variable.

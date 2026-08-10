@@ -27,6 +27,12 @@ import aiohttp
 import aiosqlite
 from aiohttp import web
 
+# bin/ is a directory of scripts, not a package. Put it on the path
+# explicitly so sibling modules resolve both when this file is executed
+# directly and when a test loads it by path under a synthetic module name.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import ask_handler  # noqa: E402
+
 # =============================================================================
 # Configuration
 # =============================================================================
@@ -131,6 +137,16 @@ interrupted_agents: set = set()
 typing_tasks: Dict[str, asyncio.Task] = {}
 agent_todo_lists: Dict[str, List[Dict]] = {}
 active_todo_messages: Dict[str, Dict] = {}
+
+# Outstanding multiple-choice questions (#101). Keyed by ask id; created by
+# POST /ask on behalf of the MCP `ask_user` tool, resolved by the relay when
+# somebody clicks a button.
+ask_registry = ask_handler.AskRegistry()
+
+# Who and where the agent's current turn came from. `/ask` has no channel of
+# its own — the question belongs in the conversation that prompted it — and
+# the authors of that conversation are the people allowed to answer it.
+agent_turn_context: Dict[str, Dict[str, Any]] = {}
 
 # Discord token mapping
 AGENT_TOKENS: Dict[str, str] = {}
@@ -517,7 +533,12 @@ async def start_agent_subprocess(agent: str):
     # collision, which is the point: an operator scoping one agent to a
     # different API base URL or timeout without touching every other agent.
     env_overrides = config.get("env") or {}
-    spawn_env = {**os.environ, **env_overrides} if env_overrides else None
+    # KARAKOS_AGENT is not an override — it is identity. The MCP tool server
+    # runs as a child of this subprocess and otherwise has no way to say
+    # which agent is calling `ask_user`, which is what decides where the
+    # question is posted (#101). Set first so an operator's `env` block can
+    # still win if they really mean to.
+    spawn_env = {**os.environ, "KARAKOS_AGENT": agent, **env_overrides}
     if env_overrides:
         log.info(f"{agent} env overrides: {sorted(env_overrides.keys())}")
 
@@ -1220,6 +1241,59 @@ async def post_to_discord(agent: str, channel_id: str, content: str,
 
     return last_msg_id
 
+def gateway_agent() -> Optional[str]:
+    """The agent whose bot token bin/relay.py logs in with.
+
+    This matters for #101 and only for #101. A button click is delivered over
+    the gateway to the application that posted the message, and the relay
+    holds exactly one gateway connection — opened with the first agent in
+    agents.json that has a token (bin/relay.py::main). A question posted
+    under any other agent's token renders fine and is then simply
+    unclickable: Discord has nowhere to deliver the interaction. So the ask
+    embed goes out under this token regardless of which agent asked, and the
+    embed footer carries the real asker's name.
+
+    The selection rule is duplicated rather than shared because the two
+    processes do not import each other; both walk agent_config in file order
+    and take the first entry with a configured token.
+    """
+    for name in agent_config:
+        if name in AGENT_TOKENS:
+            return name
+    return None
+
+
+async def post_discord_payload(agent: str, channel_id: str,
+                               payload: Dict[str, Any]) -> Optional[str]:
+    """POST a raw Discord message body (embeds, components) to a channel.
+
+    post_to_discord() only knows how to send text and would drop the
+    components, which are the entire point of an ask. Returns the message id
+    or None; deliberately single-attempt, because the caller is a person
+    waiting on a question and a slow retry loop is worse than a fast failure
+    it can report.
+    """
+    if not channel_id or channel_id == "0":
+        return None
+    token = AGENT_TOKENS.get(agent)
+    if not token:
+        log.warning(f"No Discord token for {agent}; cannot post interactive message")
+        return None
+    url = f"https://discord.com/api/v10/channels/{channel_id}/messages"
+    headers = {"Authorization": f"Bot {token}", "Content-Type": "application/json"}
+    try:
+        async with http_session.post(url, headers=headers, json=payload) as resp:
+            if resp.status in (200, 201):
+                data = await resp.json()
+                return data.get("id")
+            body = (await resp.text())[:200]
+            log.error(f"Discord API error {resp.status} posting interactive message: {body}")
+            return None
+    except Exception as e:
+        log.error(f"Error posting interactive message to {channel_id}: {e}")
+        return None
+
+
 async def start_typing(agent: str, channel_id: str):
     """Start typing indicator in Discord channel"""
     if channel_id == "0" or channel_id in typing_tasks:
@@ -1510,6 +1584,17 @@ async def process_agent_queue(agent: str):
         if all(msg["is_bot"] for msg in messages):
             formatted_content = f"{AUTOMATED_TRAFFIC_SENTINEL}\n{formatted_content}"
 
+        # Record where this turn came from before the subprocess can act on
+        # it. POST /ask has no request context of its own — the MCP tool that
+        # calls it knows only the agent name — so the channel a question is
+        # posted into and the people entitled to answer it both come from
+        # here (#101).
+        agent_turn_context[agent] = {
+            "channel_id": channel_id,
+            "author_ids": [msg["author_id"] for msg in messages if not msg["is_bot"]],
+            "message_ids": message_ids,
+        }
+
         # Start typing indicator
         await start_typing(agent, channel_id)
 
@@ -1517,7 +1602,14 @@ async def process_agent_queue(agent: str):
         await send_to_agent(agent, formatted_content, message_ids)
 
         # Read response
-        response_text, metadata = await read_agent_response(agent, channel_id, message_ids)
+        try:
+            response_text, metadata = await read_agent_response(agent, channel_id, message_ids)
+        finally:
+            # The turn is over: any question still on screen belongs to a
+            # subprocess that has stopped waiting for it, and answering it
+            # would feed a reply into a turn that no longer exists.
+            ask_registry.discard_agent(agent)
+            agent_turn_context.pop(agent, None)
 
         # Stop typing
         await stop_typing(channel_id)
@@ -1999,6 +2091,134 @@ async def handle_cost_get(request):
 # Graceful Shutdown
 # =============================================================================
 
+def _bearer_ok(request) -> bool:
+    auth_header = request.headers.get("Authorization", "")
+    return auth_header.startswith("Bearer ") and auth_header[7:] == AGENT_SERVER_TOKEN
+
+
+async def handle_ask_create(request):
+    """POST /ask - Put a multiple-choice question to the user in Discord.
+
+    Called by the MCP `ask_user` tool (mcp/tools-server.py), which then polls
+    GET /ask/{id} for the answer. The question is posted into the channel the
+    agent's current turn came from, as an embed with one button per option.
+    """
+    if not _bearer_ok(request):
+        return web.json_response({"error": "Unauthorized"}, status=401)
+
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON"}, status=400)
+
+    agent = data.get("agent")
+    if not agent or agent not in agent_config:
+        return web.json_response({"error": "Invalid agent"}, status=400)
+
+    context = agent_turn_context.get(agent) or {}
+    channel_id = str(data.get("channel_id") or context.get("channel_id") or "0")
+    if channel_id == "0":
+        return web.json_response(
+            {"error": "No Discord channel for this turn; the question has nowhere to go"},
+            status=409,
+        )
+
+    # Whoever is in this conversation may answer, and so may the owner. An
+    # empty set means the turn had no human author (a heartbeat, a poke), in
+    # which case anyone in the channel can answer — restricting an unattended
+    # question to nobody would just hang it.
+    allowed = {str(a) for a in (context.get("author_ids") or ()) if a and str(a) != "0"}
+    if allowed and OWNER_DISCORD_ID and OWNER_DISCORD_ID != "0":
+        allowed.add(str(OWNER_DISCORD_ID))
+
+    try:
+        ask = ask_registry.create(
+            agent=agent,
+            channel_id=channel_id,
+            question=data.get("question", ""),
+            options=data.get("options"),
+            header=data.get("header"),
+            timeout=data.get("timeout"),
+            allowed_user_ids=allowed,
+        )
+    except ask_handler.AskError as e:
+        return web.json_response({"error": str(e)}, status=400)
+
+    # Posted under the relay's own token so the click has somewhere to land.
+    poster = gateway_agent() or agent
+    message_id = await post_discord_payload(poster, channel_id, ask_registry.payload_for(ask))
+    if not message_id:
+        ask_registry.discard_agent(agent)
+        return web.json_response(
+            {"error": "Could not post the question to Discord"}, status=502
+        )
+    ask.message_id = message_id
+
+    # A person deciding takes minutes, during which the subprocess emits
+    # nothing. Park the beacon somewhere wedge-check.py does not treat as an
+    # active turn, or every ask pages as a hang.
+    write_agent_beacon(agent, ask_handler.AWAITING_USER_STATE, force=True)
+    log.info(f"{agent} asked a question in {channel_id} (ask {ask.ask_id}, msg {message_id})")
+
+    return web.json_response(ask.status(), status=201)
+
+
+async def handle_ask_status(request):
+    """GET /ask/{ask_id} - Poll for the answer."""
+    if not _bearer_ok(request):
+        return web.json_response({"error": "Unauthorized"}, status=401)
+
+    for expired in ask_registry.sweep():
+        # Nobody clicked. Hand the agent's beacon back to the wedge detector
+        # so a genuinely hung turn after a timed-out question is still seen.
+        write_agent_beacon(expired.agent, "PROCESSING", force=True)
+        log.info(f"{expired.agent} question {expired.ask_id} expired unanswered")
+
+    ask = ask_registry.get(request.match_info.get("ask_id", ""))
+    if ask is None:
+        return web.json_response({"status": "unknown"}, status=404)
+    return web.json_response(ask.status())
+
+
+async def handle_ask_answer(request):
+    """POST /ask/{ask_id}/answer - Record a button click.
+
+    Always 200 with an `outcome` field, including for an unknown ask. The
+    caller is bin/relay.py turning this into a line of text for the person
+    who clicked, and every outcome — expired, already answered, not your
+    question — is something they need told. A bare 404 would give them
+    nothing but a dead button, which is the failure this whole feature
+    exists to remove.
+    """
+    if not _bearer_ok(request):
+        return web.json_response({"error": "Unauthorized"}, status=401)
+
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON"}, status=400)
+
+    ask_id = request.match_info.get("ask_id", "")
+    index = data.get("index")
+    outcome, ask = ask_registry.answer(
+        ask_id, index, data.get("user_id"), data.get("user_name")
+    )
+
+    if outcome == "answered" and ask is not None:
+        # The turn is moving again; restore the beacon the ask parked.
+        write_agent_beacon(ask.agent, "PROCESSING", force=True)
+        log.info(
+            f"{ask.agent} question {ask.ask_id} answered "
+            f"'{ask.answer_label}' by {ask.answered_by}"
+        )
+
+    return web.json_response({
+        "outcome": outcome,
+        "note": ask_handler.resolution_note(outcome, ask),
+        "answer": ask.answer_label if ask is not None else None,
+    })
+
+
 async def graceful_shutdown(sig):
     """Handle SIGTERM gracefully"""
     global shutting_down
@@ -2126,7 +2346,6 @@ def create_app(with_lifecycle: bool = True) -> web.Application:
     """
     app = web.Application()
 
-    # Register routes
     app.router.add_post("/message", handle_message)
     app.router.add_get("/health", handle_health)
     app.router.add_get("/agents", handle_agents)
@@ -2139,6 +2358,9 @@ def create_app(with_lifecycle: bool = True) -> web.Application:
     app.router.add_post("/cost", handle_cost)
     app.router.add_get("/cost/{agent}", handle_cost_get)
     app.router.add_get("/usage", handle_usage)
+    app.router.add_post("/ask", handle_ask_create)
+    app.router.add_get("/ask/{ask_id}", handle_ask_status)
+    app.router.add_post("/ask/{ask_id}/answer", handle_ask_answer)
 
     # Register startup/shutdown handlers
     if with_lifecycle:

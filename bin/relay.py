@@ -24,6 +24,11 @@ from types import SimpleNamespace
 from typing import Optional, Dict, List
 from logging.handlers import RotatingFileHandler
 
+# bin/ is a directory of scripts, not a package — see the same note in
+# bin/agent-server.py.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import ask_handler  # noqa: E402
+
 # =============================================================================
 # Utilities
 # =============================================================================
@@ -667,6 +672,9 @@ class DiscordAdapter(discord.Client):
             getattr(getattr(interaction, "user", None), "id", None),
         )
 
+        if interaction.type is discord.InteractionType.component:
+            await self.on_component_interaction(interaction)
+            return
         if getattr(interaction, "type", None) != discord.InteractionType.application_command:
             return
         if name not in SLASH_COMMANDS:
@@ -994,14 +1002,86 @@ class DiscordAdapter(discord.Client):
             message,
             "Commands: " + ", ".join(f"`/{c}`" for c in sorted(SLASH_COMMANDS))
         )
+    async def on_component_interaction(self, interaction: discord.Interaction):
+        """Deliver a button click back to the agent that is waiting on it.
+
+        Reached via on_interaction, which owns the single `on_interaction`
+        name discord.py dispatches to. #86 (slash commands) and #101 (ask
+        buttons) each defined that method independently; two defs in one
+        class is not an error, it just means the later one wins and the
+        other surface goes silently dead. They are one entry point with two
+        legs, split by interaction type.
+
+        This is the return leg of #101. The agent server posts the question
+        as an embed with buttons; Discord delivers the click here, over the
+        one gateway connection this process holds; we hand the chosen index
+        to POST /ask/{id}/answer, which unblocks the `ask_user` MCP tool.
+
+        Every component interaction in the guild lands in this method, so
+        anything whose custom_id is not ours is dropped without a word.
+        """
+        if interaction.type is not discord.InteractionType.component:
+            return
+
+        data = interaction.data or {}
+        parsed = ask_handler.parse_custom_id(data.get("custom_id"))
+        if parsed is None:
+            return
+        ask_id, index = parsed
+
+        user = interaction.user
+        ok, detail, body = await self.agent_server_post_json(
+            f"/ask/{ask_id}/answer",
+            {
+                "index": index,
+                "user_id": str(getattr(user, "id", "")),
+                "user_name": getattr(user, "display_name", None) or getattr(user, "name", ""),
+            },
+        )
+        if not ok:
+            log.error(f"Could not record answer for ask {ask_id}: {detail}")
+            await self.ack_interaction(interaction, "Could not reach the agent server.",
+                                       resolved=False)
+            return
+
+        outcome = body.get("outcome", "unknown")
+        note = body.get("note") or ask_handler.resolution_note(outcome, None)
+        log.info(f"ask {ask_id} click by {getattr(user, 'id', '?')} -> {outcome}")
+        await self.ack_interaction(interaction, note, resolved=(outcome == "answered"))
+
+    async def ack_interaction(self, interaction: discord.Interaction, note: str,
+                              resolved: bool):
+        """Close the loop in Discord itself.
+
+        A resolved question loses its buttons and gains the answer, so the
+        channel keeps a record of what was decided. Anything else is an
+        ephemeral note to the clicker only — the question stays live for
+        whoever it was actually for.
+        """
+        try:
+            if not resolved:
+                await interaction.response.send_message(note, ephemeral=True)
+                return
+            embed = None
+            if interaction.message and interaction.message.embeds:
+                embed = interaction.message.embeds[0]
+                embed.add_field(name="Answer", value=note, inline=False)
+                embed.colour = discord.Colour(ask_handler.ANSWERED_COLOR)
+            await interaction.response.edit_message(embed=embed, view=None)
+        except Exception as e:
+            log.error(f"Failed to acknowledge interaction: {e}")
 
     async def agent_server_post(self, path: str):
         """POST to the agent server. Returns (ok, detail-on-failure)."""
         ok, detail, _body = await self.agent_server_post_json(path)
         return ok, detail
 
-    async def agent_server_post_json(self, path: str):
+    async def agent_server_post_json(self, path: str, payload: Dict = None):
         """POST to the agent server. Returns (ok, detail-on-failure, body).
+
+        `payload`, when given, is sent as the JSON body -- #101's ask-answer
+        route is the first caller that needs one. aiohttp sends no body for
+        the None default, so the bodyless callers are unaffected.
 
         `body` is always a dict so callers can `.get()` unconditionally — an
         endpoint that reports *what it did* (interrupted vs already idle,
@@ -1011,7 +1091,8 @@ class DiscordAdapter(discord.Client):
         try:
             async with self.http_session.post(
                 f"{AGENT_SERVER_URL}{path}",
-                headers={"Authorization": f"Bearer {AGENT_SERVER_TOKEN}"}
+                headers={"Authorization": f"Bearer {AGENT_SERVER_TOKEN}"},
+                json=payload,
             ) as resp:
                 if resp.status == 200:
                     try:

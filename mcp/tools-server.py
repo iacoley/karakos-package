@@ -12,6 +12,8 @@ import sqlite3
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -22,6 +24,19 @@ AUDIT_DB_PATH = WORKSPACE / "data" / "mcp-tools-audit.db"
 
 # Maximum payload size for tool arguments
 MAX_ARGS_SIZE = 65536
+
+# Agent server, for the ask_user round trip (#101). KARAKOS_AGENT is set by
+# bin/agent-server.py on the subprocess this tool server is a child of; it is
+# how a question knows whose conversation to appear in.
+AGENT_SERVER_PORT = os.environ.get("AGENT_SERVER_PORT", "18791")
+AGENT_SERVER_URL = os.environ.get("AGENT_SERVER_URL", f"http://localhost:{AGENT_SERVER_PORT}")
+AGENT_SERVER_TOKEN = os.environ.get("AGENT_SERVER_TOKEN", "")
+KARAKOS_AGENT = os.environ.get("KARAKOS_AGENT", "")
+
+# Poll cadence while a question is on screen. Short enough that the agent
+# resumes promptly after a click, long enough not to spin.
+ASK_POLL_INTERVAL_SEC = float(os.environ.get("ASK_POLL_INTERVAL_SEC", "2.0"))
+ASK_DEFAULT_TIMEOUT_SEC = 300
 
 # =============================================================================
 # Core Tools (ship by default)
@@ -81,12 +96,12 @@ CORE_TOOLS = [
                 },
                 "message": {
                     "type": "string",
-                    "free_text": True,
+                    "path_mode": "none",
                     "description": "Message to deliver to yourself at that time (the usual case for a reminder)"
                 },
                 "command": {
                     "type": "string",
-                    "free_text": True,
+                    "path_mode": "none",
                     "description": "Shell command to run at that time, instead of a message"
                 },
                 "label": {
@@ -191,6 +206,43 @@ CORE_TOOLS = [
                 }
             },
             "required": ["action"]
+        }
+    },
+    {
+        "name": "ask_user",
+        "description": (
+            "Put a multiple-choice question to the user and wait for their "
+            "answer. Renders in Discord as an embed with one button per "
+            "option; returns the option they clicked. This is the only way "
+            "to ask a blocking question over this transport — the built-in "
+            "AskUserQuestion tool is not available to agents running "
+            "headless. Use it for decisions you cannot make yourself; do not "
+            "use it for questions you could simply write out in your reply."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": "The question to put to the user",
+                    "path_mode": "none"
+                },
+                "options": {
+                    "type": "array",
+                    "description": "2-10 choices. Each is a string, or an object with 'label' and optional 'description'.",
+                    "items": {"type": ["string", "object"]}
+                },
+                "header": {
+                    "type": "string",
+                    "description": "Short title for the embed (optional)",
+                    "path_mode": "none"
+                },
+                "timeout": {
+                    "type": "integer",
+                    "description": "Seconds to wait for an answer (default 300, max 3600)"
+                }
+            },
+            "required": ["question", "options"]
         }
     },
 ]
@@ -331,11 +383,19 @@ def validate_args(args: dict, schema: dict) -> str | None:
             return f"Field '{key}' must be one of: {prop_schema['enum']}"
 
         # Path safety (reject traversal unless explicitly allowed).
-        # Fields marked free_text are prose or shell commands, where ".." is an
-        # ellipsis rather than a parent directory — "remind me to check the
-        # logs..." must not fail validation as a traversal attempt.
+        # `path_mode: "none"` marks a field as prose or a shell command rather
+        # than a path: an ellipsis in "Ship it, or wait...?" or "remind me to
+        # check the logs..." contains ".." and would otherwise be rejected as
+        # traversal, which makes any free-text field unusable.
+        #
+        # #132 and #101 hit this same wall independently and landed on two
+        # different spellings — a `free_text: True` boolean and this
+        # `path_mode: "none"`. They are one axis, not two, so they are unified
+        # here on path_mode, which main already used for "absolute". Keeping
+        # both would mean every future free-text field has to guess which flag
+        # this predicate actually reads.
         if isinstance(value, str) and ".." in value:
-            if not prop_schema.get("free_text") and prop_schema.get("path_mode") != "absolute":
+            if prop_schema.get("path_mode") not in ("absolute", "none"):
                 return f"Field '{key}' contains path traversal"
 
     return None
@@ -345,8 +405,106 @@ def validate_args(args: dict, schema: dict) -> str | None:
 # Tool Dispatch
 # =============================================================================
 
+def agent_server_request(method: str, path: str, payload: dict = None,
+                         timeout: float = 15.0) -> tuple[int, dict]:
+    """One request to the local agent server. Returns (status, body).
+
+    Uses urllib rather than aiohttp on purpose: this server is a synchronous
+    stdio JSON-RPC loop with no event loop of its own, and adding an async
+    HTTP client here would mean adding a dependency to the one process that
+    currently has none beyond the standard library.
+    """
+    url = f"{AGENT_SERVER_URL}{path}"
+    data = json.dumps(payload).encode() if payload is not None else None
+    req = urllib.request.Request(url, data=data, method=method)
+    req.add_header("Authorization", f"Bearer {AGENT_SERVER_TOKEN}")
+    if data is not None:
+        req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            body = resp.read().decode() or "{}"
+            return resp.status, json.loads(body)
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.loads(e.read().decode() or "{}")
+        except (ValueError, OSError):
+            return e.code, {}
+    except Exception as e:
+        return 0, {"error": str(e)}
+
+
+def ask_user(args: dict, sleep=time.sleep, monotonic=time.monotonic) -> dict:
+    """Put a question to the user and block until they answer it.
+
+    The blocking is the feature. The agent's turn is suspended inside this
+    tool call, so the answer arrives as a tool result in the same turn rather
+    than as a fresh message the agent has to correlate itself.
+
+    `sleep`/`monotonic` are injectable so the poll loop is testable without a
+    real clock — the test drives the same loop the agent drives, and the
+    deadline is real rather than a fixed sleep.
+    """
+    agent = args.get("agent") or KARAKOS_AGENT
+    if not agent:
+        return {
+            "status": "error",
+            "error": "No agent identity (KARAKOS_AGENT unset); cannot route the question",
+        }
+
+    timeout = args.get("timeout") or ASK_DEFAULT_TIMEOUT_SEC
+    try:
+        timeout = float(timeout)
+    except (TypeError, ValueError):
+        timeout = ASK_DEFAULT_TIMEOUT_SEC
+
+    status, body = agent_server_request("POST", "/ask", {
+        "agent": agent,
+        "question": args.get("question", ""),
+        "options": args.get("options"),
+        "header": args.get("header"),
+        "timeout": timeout,
+    })
+    if status != 201:
+        return {
+            "status": "error",
+            "error": body.get("error") or f"agent server returned {status}",
+        }
+
+    ask_id = body.get("ask_id")
+    deadline = monotonic() + timeout + ASK_POLL_INTERVAL_SEC * 2
+
+    while True:
+        poll_status, poll_body = agent_server_request("GET", f"/ask/{ask_id}")
+        state = poll_body.get("status")
+        if poll_status == 200 and state == "answered":
+            return {
+                "status": "answered",
+                "answer": poll_body.get("answer"),
+                "answer_index": poll_body.get("answer_index"),
+                "answered_by": poll_body.get("answered_by"),
+                "question": poll_body.get("question"),
+            }
+        if poll_status == 404 or state == "expired":
+            # 404 also covers "the agent server restarted while we waited" —
+            # either way there is no answer coming and the agent should stop
+            # holding the turn open.
+            return {
+                "status": "timeout",
+                "error": "The user did not answer in time; decide without them or ask again.",
+            }
+        if monotonic() >= deadline:
+            return {
+                "status": "timeout",
+                "error": "Timed out waiting for an answer.",
+            }
+        sleep(ASK_POLL_INTERVAL_SEC)
+
+
 def handle_core_tool(tool_name: str, args: dict) -> dict:
     """Handle built-in core tools."""
+
+    if tool_name == "ask_user":
+        return ask_user(args)
 
     if tool_name == "workspace":
         action = args.get("action", "status")

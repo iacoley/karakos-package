@@ -261,22 +261,33 @@ def test_start_agent_subprocess_applies_per_agent_env(monkeypatch, tmp_workspace
     captured = _spawn_and_capture(monkeypatch, tmp_workspace, "env-agent")
 
     env = captured["kwargs"].get("env")
-    assert env is not None, "no per-agent env override should still pass env=None, but this agent has one"
+    assert env is not None
     assert env["KARAKOS_TEST_OVERRIDE"] == "override-value"
     # Overrides layer onto the inherited environment rather than replacing it.
     assert env["KARAKOS_TEST_AMBIENT"] == "ambient-value"
 
 
-def test_start_agent_subprocess_without_env_key_passes_env_none(monkeypatch, tmp_workspace):
-    """No `env` key in the agent's config must behave exactly as before
-    this change: env=None to create_subprocess_exec, i.e. plain inherit.
-    A silent default-env dict here would be a behavior change for every
-    agent that never opted into per-agent env."""
+def test_start_agent_subprocess_without_env_key_still_inherits_everything(
+        monkeypatch, tmp_workspace):
+    """No `env` key in the agent's config must still mean plain inherit.
+
+    This used to assert `env is None`, which was the same guarantee spelled
+    differently. Since #101 the spawn environment is always an explicit dict
+    — the agent's own name has to reach the MCP tool server somehow, and the
+    environment is the only channel a subprocess-of-a-subprocess has — so the
+    property under test is that the dict is os.environ plus that one key, and
+    never a replacement for it.
+    """
+    monkeypatch.setenv("KARAKOS_TEST_AMBIENT", "ambient-value")
     _write_agent(tmp_workspace, "plain-agent")
 
     captured = _spawn_and_capture(monkeypatch, tmp_workspace, "plain-agent")
 
-    assert captured["kwargs"].get("env") is None
+    env = captured["kwargs"].get("env")
+    assert env is not None
+    assert env["KARAKOS_TEST_AMBIENT"] == "ambient-value", \
+        "the spawn environment replaced the inherited one instead of layering onto it"
+    assert env["KARAKOS_AGENT"] == "plain-agent"
 
 
 # ---------------------------------------------------------------------------
