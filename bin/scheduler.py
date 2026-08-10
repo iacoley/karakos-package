@@ -145,6 +145,31 @@ def replay_oneshots():
     except Exception as e:
         log.error(f"Oneshot replay failed: {e}")
 
+def run_cli_upgrade_watchdog():
+    """Catch a Claude CLI upgrade that arrived without going through us.
+
+    The CLI is not released by this project, and it changes underneath a
+    running install on every `docker compose pull` onto a rebuilt image. A
+    release that breaks the agent loop installs cleanly and reports a version,
+    so nothing else here can see it — the symptom is silence.
+
+    Exit 1 means "the upgrade was reverted and a notice was posted", which is
+    a finding rather than an error, so it is not treated as a failed run.
+    """
+    try:
+        result = subprocess.run(
+            ["bash", f"{WORKSPACE_ROOT}/bin/cli-upgrade-watchdog.sh"],
+            capture_output=True,
+            text=True
+        )
+        if result.returncode == 1:
+            log.warning(f"Claude CLI upgrade reverted: {result.stdout.strip()}")
+        elif result.returncode == 2:
+            log.error(f"Claude CLI revert FAILED: {result.stdout.strip()}")
+        elif result.returncode not in (0, 3):
+            log.error(f"CLI upgrade watchdog failed ({result.returncode}): {result.stderr.strip()}")
+    except OSError as e:
+        log.error(f"CLI upgrade watchdog could not run: {e}")
 
 def check_updates():
     """Check for Karakos updates"""
@@ -204,6 +229,11 @@ def main():
     # alert within two minutes, and a check that runs at 04:00 cannot make
     # that promise at any other hour. It is a file read and a comparison.
     schedule.every(1).minutes.do(run_wedge_check)
+    # Hourly, not daily: a CLI swapped in by an image pull darkens the install
+    # from the moment it lands, and a daily check leaves up to 24 hours of
+    # unanswered messages. The tick itself is a version read — it only spends
+    # an API turn when the version actually moved.
+    schedule.every().hour.do(run_cli_upgrade_watchdog)
     schedule.every().day.at("04:30").do(purge_old_data)
     schedule.every().monday.at("05:00").do(check_updates)  # Weekly update check
 
@@ -219,6 +249,13 @@ def main():
     replay_oneshots()
 
     log.info("Scheduler configured, entering main loop")
+
+    # Run the CLI watchdog once immediately. Startup is when drift is most
+    # likely — the container has just come up on a freshly pulled image, which
+    # is how a new Claude CLI actually arrives. Waiting for the first hourly
+    # tick would leave a broken CLI unchallenged for an hour of the exact
+    # window it is most likely to be broken in.
+    run_cli_upgrade_watchdog()
 
     # Main loop
     while True:

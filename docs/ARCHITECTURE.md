@@ -96,6 +96,33 @@ Replaces cron. Runs periodic tasks with full environment:
 | Memory maintenance | 6 hours | `bin/memory-maintenance.py` |
 | Data purge | 24 hours | Removes old JSONL/logs beyond retention |
 | Update check | Weekly | `bin/check-updates.sh` |
+| Claude CLI rollback guard | Startup + hourly | `bin/cli-upgrade-watchdog.sh` |
+
+### Claude CLI rollback guard
+
+The agent loop runs on a CLI this project does not release, and that CLI is
+replaced underneath a running install on every `docker compose pull` onto a
+rebuilt image. A release that breaks the loop installs cleanly, answers
+`claude --version`, and keeps every other health signal green — the only
+symptom is that messages stop being answered.
+
+`bin/cli-upgrade-watchdog.sh` notices the installed version has moved away
+from the last version this install completed a turn on, runs one probe turn
+over the same stream-json wire the agent server uses, and reinstalls the
+known-good version if that turn fails. It only spends an API call when the
+version actually changed.
+
+`bin/upgrade-claude-cli.sh` is the same guarantee for a deliberate upgrade:
+`upgrade-claude-cli.sh --to 1.2.3` records the current version first, and
+rolls back to it if the new one cannot complete a turn.
+
+Both post the revert notice with `bin/discord-notify.sh` — the bot token
+directly — and never through `bin/poke.sh`, which queues a message *for an
+agent*. The failure being reported is that agents cannot complete a turn, so
+that queue is precisely where the notice would never be read.
+
+Both accept `--selftest`, which proves the rollback fires against fake
+`npm`/`claude` binaries without touching the real install.
 
 The loop ticks every 15 seconds (`SCHEDULER_TICK_SECONDS`), because it also
 drives the oneshot spool below.
