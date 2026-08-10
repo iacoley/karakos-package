@@ -59,6 +59,49 @@ CORE_TOOLS = [
         }
     },
     {
+        "name": "schedule",
+        "description": (
+            "Schedule your own future work. This is how a promise like "
+            "\"I'll check back in 10 minutes\" becomes a mechanism instead of a "
+            "sentence. Actions: create (schedule a message or command for later), "
+            "list (show what is pending), cancel (drop a pending item by label). "
+            "Scheduled items survive a restart of the container."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["create", "list", "cancel"],
+                    "description": "The action to perform"
+                },
+                "when": {
+                    "type": "string",
+                    "description": "When to fire: a relative span ('10m', '+2h', '1h30m') or an absolute time ('2026-08-09 09:00')"
+                },
+                "message": {
+                    "type": "string",
+                    "free_text": True,
+                    "description": "Message to deliver to yourself at that time (the usual case for a reminder)"
+                },
+                "command": {
+                    "type": "string",
+                    "free_text": True,
+                    "description": "Shell command to run at that time, instead of a message"
+                },
+                "label": {
+                    "type": "string",
+                    "description": "Short name for this item; required for create and cancel"
+                },
+                "agent": {
+                    "type": "string",
+                    "description": "Agent to deliver the message to (default: primary agent)"
+                }
+            },
+            "required": ["action"]
+        }
+    },
+    {
         "name": "memory",
         "description": "Query episodic memory. Actions: recall (search episodes), facts (search facts), recent (recent episodes).",
         "inputSchema": {
@@ -287,9 +330,12 @@ def validate_args(args: dict, schema: dict) -> str | None:
         if "enum" in prop_schema and value not in prop_schema["enum"]:
             return f"Field '{key}' must be one of: {prop_schema['enum']}"
 
-        # Path safety (reject traversal unless explicitly allowed)
+        # Path safety (reject traversal unless explicitly allowed).
+        # Fields marked free_text are prose or shell commands, where ".." is an
+        # ellipsis rather than a parent directory — "remind me to check the
+        # logs..." must not fail validation as a traversal attempt.
         if isinstance(value, str) and ".." in value:
-            if not prop_schema.get("path_mode") == "absolute":
+            if not prop_schema.get("free_text") and prop_schema.get("path_mode") != "absolute":
                 return f"Field '{key}' contains path traversal"
 
     return None
@@ -352,6 +398,52 @@ def handle_core_tool(tool_name: str, args: dict) -> dict:
                     "path": str(latest),
                 }
             return {"status": "not_found"}
+
+    elif tool_name == "schedule":
+        # Shells out to bin/oneshot.py rather than importing it, for the same
+        # reason skill tools are subprocesses: this server must not inherit a
+        # scheduling bug as an unhandled exception in its JSON-RPC loop.
+        action = args.get("action", "list")
+        oneshot_bin = WORKSPACE / "bin" / "oneshot.py"
+        if not oneshot_bin.exists():
+            return {"error": f"Scheduler primitive not found: {oneshot_bin}"}
+
+        if action == "create":
+            label = args.get("label", "").strip()
+            when = args.get("when", "").strip()
+            if not label:
+                return {"error": "A label is required to create a scheduled item"}
+            if not when:
+                return {"error": "A 'when' is required (e.g. '10m' or '2026-08-09 09:00')"}
+            if not args.get("message") and not args.get("command"):
+                return {"error": "Provide a message to deliver or a command to run"}
+            cmd = ["python3", str(oneshot_bin), "--json", "schedule",
+                   "--label", label, "--when", when]
+            if args.get("message"):
+                cmd += ["--message", args["message"]]
+            if args.get("command"):
+                cmd += ["--command", args["command"]]
+            if args.get("agent"):
+                cmd += ["--agent", args["agent"]]
+        elif action == "list":
+            cmd = ["python3", str(oneshot_bin), "--json", "list"]
+        elif action == "cancel":
+            label = args.get("label", "").strip()
+            if not label:
+                return {"error": "A label is required to cancel a scheduled item"}
+            cmd = ["python3", str(oneshot_bin), "--json", "cancel", label]
+        else:
+            return {"error": f"Unknown schedule action: {action}"}
+
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True,
+                                    timeout=30, cwd=str(WORKSPACE))
+        except subprocess.TimeoutExpired:
+            return {"error": "Scheduler timed out"}
+        try:
+            return json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return {"error": result.stderr.strip() or "Scheduler produced no output"}
 
     elif tool_name == "memory":
         action = args.get("action", "recent")

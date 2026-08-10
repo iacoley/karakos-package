@@ -97,6 +97,34 @@ Replaces cron. Runs periodic tasks with full environment:
 | Data purge | 24 hours | Removes old JSONL/logs beyond retention |
 | Update check | Weekly | `bin/check-updates.sh` |
 
+The loop ticks every 15 seconds (`SCHEDULER_TICK_SECONDS`), because it also
+drives the oneshot spool below.
+
+## Scheduled one-off work (`bin/oneshot.py`)
+
+The table above is fixed at build time. `bin/oneshot.py` is the primitive that
+lets an agent schedule *arbitrary* future work at runtime — so "I'll check back
+in ten minutes" is a mechanism rather than a sentence. Agents reach it through
+the `schedule` MCP tool; humans and scripts through the CLI.
+
+```
+oneshot.py schedule --label check-logs --when 10m --message "check the logs"
+oneshot.py list
+oneshot.py cancel check-logs
+```
+
+Each scheduled item is one JSON file in `data/oneshot-spool/`, holding the
+**absolute** epoch second it is due — never the relative span the caller typed.
+`data/` is a persistent volume, so the spool outlives the container that wrote
+it, and `scheduler.py` re-reads it at startup before entering its loop.
+
+There is no systemd inside this image, so there are no transient timers to
+re-arm: being in the spool *is* being armed, and the scheduler tick is what
+fires it. A deadline that passed while the container was down fires
+immediately, unless it is more than `ONESHOT_STALE_AFTER_SECONDS` late
+(default 24h), in which case it is dropped with a log line rather than
+arriving days after it was useful.
+
 ## MCP Tool Server (`mcp/tools-server.py`)
 
 JSON-RPC 2.0 server over stdin/stdout. Provides tools to Claude agents:
@@ -105,6 +133,7 @@ JSON-RPC 2.0 server over stdin/stdout. Provides tools to Claude agents:
 - `workspace` — System config, agent registry
 - `session` — Finalize/load session summaries
 - `memory` — Query episodic memory and facts
+- `schedule` — Schedule/list/cancel future work (see `bin/oneshot.py` above)
 - `discord` — Read-only Discord access (channels, history)
 - `taskboard` — Task tracking
 - `vault` — Git-backed knowledge store

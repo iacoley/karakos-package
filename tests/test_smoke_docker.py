@@ -88,6 +88,7 @@ class TestFileStructure:
         "bin/agent-server.py",
         "bin/relay.py",
         "bin/scheduler.py",
+        "bin/oneshot.py",
         "bin/entrypoint.sh",
         "bin/capture.py",
         "bin/health-monitor.py",

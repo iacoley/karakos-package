@@ -8,6 +8,7 @@ Health heartbeat confirms liveness.
 
 import schedule
 import subprocess
+import sys
 import os
 import json
 import time
@@ -18,6 +19,16 @@ from logging.handlers import RotatingFileHandler
 
 WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT", "/workspace"))
 HEALTH_FILE = WORKSPACE_ROOT / "data" / "health" / "scheduler.json"
+
+# How often the loop wakes. Agent-scheduled oneshots are polled on every tick,
+# so this is also the worst-case lateness of "remind me in 10 minutes". It used
+# to be 60s, which was fine for jobs pinned to the hour and too coarse for a
+# reminder a user is waiting on.
+TICK_SECONDS = int(os.environ.get("SCHEDULER_TICK_SECONDS", "15"))
+
+# bin/ is not a package; import the oneshot primitive from this script's dir.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import oneshot  # noqa: E402
 
 # Logging
 log = logging.getLogger("scheduler")
@@ -104,6 +115,37 @@ def run_wedge_check():
     except OSError as e:
         log.error(f"Wedge check could not run: {e}")
 
+def run_due_oneshots():
+    """Fire any agent-scheduled oneshot whose absolute deadline has passed.
+
+    Runs on every tick rather than on a schedule.every() job so that the
+    granularity of "remind me in N minutes" is TICK_SECONDS, not the coarsest
+    job interval.
+    """
+    try:
+        oneshot.run_due(log=log, progress=write_health_timestamp)
+    except Exception as e:
+        log.error(f"Oneshot poll failed: {e}")
+
+
+def replay_oneshots():
+    """Re-arm the spool this container inherited from its previous life.
+
+    The spool lives on the persistent data volume, so a restart does not lose
+    pending work — but a deadline that passed while we were down needs an
+    explicit decision (fire late vs. drop as stale), and that decision belongs
+    at startup where it can be logged, not silently on the first tick.
+    """
+    try:
+        result = oneshot.replay(log=log, progress=write_health_timestamp)
+        log.info(
+            "Oneshot spool restored: %d pending, %d fired late, %d dropped stale",
+            len(result["rearmed"]), len(result["fired"]), len(result["dropped"]),
+        )
+    except Exception as e:
+        log.error(f"Oneshot replay failed: {e}")
+
+
 def check_updates():
     """Check for Karakos updates"""
     log.info("Checking for updates")
@@ -165,14 +207,26 @@ def main():
     schedule.every().day.at("04:30").do(purge_old_data)
     schedule.every().monday.at("05:00").do(check_updates)  # Weekly update check
 
+    # Declare liveness BEFORE the replay, not after. Replay fires every
+    # deadline missed while we were down, synchronously, and the longer the
+    # outage the more there are to fire — so the slowest replay is the one
+    # that happens right after the longest downtime. With no health file
+    # written yet, health-monitor reads "missing" and calls us dead at the
+    # exact moment we are recovering. The batch refreshes it per entry too.
+    write_health_timestamp()
+
+    # Before the first tick: whatever the previous container left in the spool.
+    replay_oneshots()
+
     log.info("Scheduler configured, entering main loop")
 
     # Main loop
     while True:
         try:
             schedule.run_pending()
+            run_due_oneshots()
             write_health_timestamp()
-            time.sleep(60)
+            time.sleep(TICK_SECONDS)
         except KeyboardInterrupt:
             log.info("Scheduler shutting down")
             break
