@@ -41,15 +41,33 @@ them in is manual for now.
 - `agent-server` needs no PTY/tmux — confirmed by reading
   `start_agent_subprocess()` in `bin/agent-server.py`: it talks to the
   Claude CLI over stdin/stdout pipes (`stream-json`), not a terminal.
-- **Open**: whether the existing auto-reload-on-commit pattern
-  (`system/reload-on-commit.py`) is safe to run natively at all, or needs
-  rework — restarting the process that's mid-way through delivering a reply
-  drops it, and a bad native hot-patch has no container image to fall back
-  to. Recommendation from a native operator (see PR discussion): keep it
-  opt-in and default off; if kept, never restart synchronously inside the
-  hook, gate on idle rather than a fixed sleep, and defer/exclude the unit
-  that's running the session which made the commit.
+- **Design fixed 2026-08-11, not yet in this codebase.** The
+  restart-safety question above has a real fix now, built and verified
+  live against a running deployment: `bin/relay.py` tracks in-flight
+  handlers (`on_message` + all seven `/status /usage /clear /reload
+  /compact /override /override-clear` slash commands) and drains up to
+  10s on `SIGTERM` before closing, instead of dying mid-handler;
+  `system/reload-on-commit.py` dispatches the bounce via a detached
+  `Popen` rather than blocking `subprocess.run`. That covers the two of
+  the native operator's three asks that weren't already handled
+  (defer/exclude-self already existed here, via `SELF_PROCESS_WARN`
+  excluding `bin/agent-server.py` — unaffected by this).
 
-Feedback wanted specifically on the restart-safety question above and on
-whether the unit shape generalizes past this specific install, before any
-of this gets wired into the installers for real.
+  **Caveat that matters for this PR specifically**: that fix was written
+  and verified against `iacoley/heart-of-gold` (the install repo this
+  install actually runs from), not this repo (`mcarmody/karakos-package`,
+  the upstream source `native/`'s changes are drafted against). It is
+  *not* included in this branch or this PR — deliberately, to keep
+  scoped to `native/` only per the collision-avoidance note above (`bin/
+  relay.py` is also where #136 is making changes; piling a third set of
+  edits onto the same file across two open PRs is exactly the conflict
+  this draft was designed to avoid). So: the mechanism this native path
+  would inherit `bin/relay.py` from still needs the fix ported here
+  before "keep it opt-in and default off" can actually be revisited — as
+  of this PR, the underlying hook is still exactly as safe/unsafe as it
+  was on 2026-08-10, only the *sibling* install-repo deployment has moved.
+  Tracking as a followup, not resolving it in-place here.
+
+Feedback still wanted on whether the unit shape generalizes past this
+specific install, before any of this gets wired into the installers for
+real.

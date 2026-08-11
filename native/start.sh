@@ -72,17 +72,24 @@ if [ -f "$WORKSPACE_ROOT/system/check-protected-paths.py" ]; then
 fi
 
 # --- Install auto-reload-on-commit post-commit hook ---
-# STILL OPEN (2026-08-10): unresolved whether this hook's current
-# relay/scheduler-only bounce list is safe to port as-is. Amos's shop does
-# not run this pattern at all natively — two self-inflicted outages taught
-# them that restarting the process delivering a reply drops it, and a bad
-# native hot-patch has no image to fall back to the way a container did.
-# Our version already excludes agent-server.py (the reply-generating
-# process) for the same reason; open question is whether bouncing relay
-# mid-post is fully covered by retry-spooling or needs one of Amos's
-# defer/wait-for-idle patterns before this ships for real. Installed here
-# for parity with the container in the meantime, not because the question
-# is resolved.
+# STILL OPEN as far as *this repo* goes (2026-08-10 note below still
+# applies here) — but the design question itself is answered now: see
+# native/README.md's "Design fixed 2026-08-11, not yet in this codebase"
+# note. Short version: bin/relay.py grew real graceful-drain-on-SIGTERM
+# handling and reload-on-commit.py's bounce went async, verified live —
+# just not in this repo yet, deliberately (this PR stays scoped to
+# native/ only, to avoid a third set of edits to bin/relay.py landing on
+# top of #136's). Port that fix into bin/relay.py /
+# system/reload-on-commit.py here before treating this hook as safe to
+# rely on natively. Original open-question note, unchanged below:
+#
+# Amos's shop does not run this pattern at all natively — two
+# self-inflicted outages taught them that restarting the process
+# delivering a reply drops it, and a bad native hot-patch has no image to
+# fall back to the way a container did. Our version already excludes
+# agent-server.py (the reply-generating process) for the same reason.
+# Installed here for parity with the container in the meantime, not
+# because the underlying mechanism is fixed in this codebase yet.
 if [ -f "$WORKSPACE_ROOT/system/reload-on-commit.py" ]; then
     cp "$WORKSPACE_ROOT/system/install-post-commit-hook.sh" "$WORKSPACE_ROOT/.git/hooks/post-commit" 2>/dev/null || true
     chmod +x "$WORKSPACE_ROOT/.git/hooks/post-commit" 2>/dev/null || true
