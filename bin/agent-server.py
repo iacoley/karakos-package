@@ -595,8 +595,13 @@ async def kill_agent_subprocess(agent: str):
         await asyncio.wait_for(proc.wait(), timeout=5)
     except asyncio.TimeoutError:
         log.warning(f"{agent} didn't terminate, sending SIGKILL")
-        proc.kill()
-        await proc.wait()
+        try:
+            proc.kill()
+            await proc.wait()
+        except ProcessLookupError:
+            pass
+    except ProcessLookupError:
+        log.warning(f"{agent} subprocess (PID {proc.pid}) was already dead")
 
     agent_processes.pop(agent, None)
 
