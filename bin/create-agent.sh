@@ -122,13 +122,20 @@ PY
 fi
 
 # Generate system prompt from template
-sed \
-    -e "s/{{AGENT_NAME}}/$AGENT_NAME/g" \
-    -e "s/{{SYSTEM_NAME}}/$SYSTEM_NAME/g" \
-    -e "s/{{OWNER_NAME}}/$OWNER_NAME/g" \
-    -e "s|{{CHANNELS}}|$CHANNELS|g" \
-    -e "s|{{OTHER_AGENTS}}|$OTHER_AGENTS|g" \
-    "$TEMPLATE_PATH" > "$AGENT_DIR/SYSTEM_PROMPT.md"
+# sed can't safely substitute multi-line replacement text (CHANNELS/
+# OTHER_AGENTS routinely span several lines once more than one channel
+# or agent exists) -- "unterminated `s' command" the moment a newline
+# lands in the replacement. python handles it directly instead.
+AGENT_NAME="$AGENT_NAME" SYSTEM_NAME="$SYSTEM_NAME" OWNER_NAME="$OWNER_NAME" \
+CHANNELS="$CHANNELS" OTHER_AGENTS="$OTHER_AGENTS" \
+TEMPLATE_PATH="$TEMPLATE_PATH" OUT_PATH="$AGENT_DIR/SYSTEM_PROMPT.md" \
+python3 - <<'PY'
+import os
+text = open(os.environ["TEMPLATE_PATH"]).read()
+for key in ("AGENT_NAME", "SYSTEM_NAME", "OWNER_NAME", "CHANNELS", "OTHER_AGENTS"):
+    text = text.replace("{{" + key + "}}", os.environ[key])
+open(os.environ["OUT_PATH"], "w").write(text)
+PY
 
 # Create empty voice.md for user customization
 touch "$AGENT_DIR/persona/voice.md"

@@ -97,6 +97,10 @@ def _request(method: str, url: str, token: str, payload=None):
         headers={
             "Authorization": f"Bot {token}",
             "Content-Type": "application/json",
+            # Discord's Cloudflare WAF 403s (error 1010) the default
+            # urllib User-Agent -- confirmed 2026-08-11 on the native
+            # install, same token/scope worked fine with any real UA.
+            "User-Agent": "KarakosBot (https://github.com/iacoley/heart-of-gold, 1.0)",
         },
     )
     try:
