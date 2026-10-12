@@ -13,6 +13,7 @@ Called by scheduler daily at 4:30 AM.
 
 import logging
 import os
+import re
 import sqlite3
 import sys
 from datetime import datetime, timedelta, timezone
@@ -95,6 +96,20 @@ def purge_tool_audit() -> int:
         return 0
 
 
+_SUMMARY_TS_RE = re.compile(r"^(?P<agent>.+)-\d{4}-\d{2}-\d{2}-\d{6}$")
+_SUMMARY_LEGACY_RE = re.compile(r"^(?P<agent>.+?)-\d[\d-]*$")
+
+
+def _summary_agent(stem: str):
+    """Agent name from '{agent}-{YYYY-MM-DD-HHMMSS}' (bin/summarize-session.py).
+
+    Strips the trailing timestamp rather than splitting on the first hyphen, so
+    hyphenated agent names ('test-agent') keep their own retention budget.
+    """
+    m = _SUMMARY_TS_RE.match(stem) or _SUMMARY_LEGACY_RE.match(stem)
+    return m.group("agent") if m else None
+
+
 def purge_old_session_summaries() -> int:
     """Keep only the last N session summaries per agent."""
     if not SESSION_SUMMARIES_DIR.exists():
@@ -104,14 +119,9 @@ def purge_old_session_summaries() -> int:
     agent_summaries = {}
 
     for file in SESSION_SUMMARIES_DIR.glob("*.md"):
-        # Expected pattern: {agent}-{timestamp}.md or {timestamp}.md
-        parts = file.stem.split("-")
-        if len(parts) >= 2:
-            # Assume first part is agent name (or 'summary' for generic)
-            agent = parts[0]
-            if agent not in agent_summaries:
-                agent_summaries[agent] = []
-            agent_summaries[agent].append(file)
+        agent = _summary_agent(file.stem)
+        if agent:
+            agent_summaries.setdefault(agent, []).append(file)
 
     deleted = 0
     for agent, files in agent_summaries.items():

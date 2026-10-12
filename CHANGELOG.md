@@ -14,10 +14,20 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-- Added: `./setup.sh --answers <file.json>` (also `install.sh --answers` and `KARAKOS_ANSWERS`) runs the wizard without prompts, with secrets readable from environment variables; example in `docs/answers.example.json`.
-- Added: `AGENTS.md` and `docs/AGENT_GUIDE.md`, an entry point and operating guide for coding agents (install, self-repair, self-improve, contribute upstream). `CLAUDE.md` imports `AGENTS.md`.
-- Changed: `install.sh` and `install.ps1` clone `main` explicitly; `KARAKOS_BRANCH` overrides it.
-- Changed: branch model. PRs target `develop`; `main` takes releases only through a release PR. CI and the coupling check also run on PRs to `develop`. `CONTRIBUTING.md` rewritten, with a release process section.
+### Added
+
+- `./setup.sh --answers <file.json>` (also `install.sh --answers` and `KARAKOS_ANSWERS`) runs the wizard without prompts, with secrets readable from environment variables; example in `docs/answers.example.json`.
+- `AGENTS.md` and `docs/AGENT_GUIDE.md`, an entry point and operating guide for coding agents (install, self-repair, self-improve, contribute upstream). `CLAUDE.md` imports `AGENTS.md`.
+
+### Changed
+
+- `install.sh` and `install.ps1` clone `main` explicitly; `KARAKOS_BRANCH` overrides it.
+- Branch model: PRs target `develop`; `main` takes releases only through a release PR. CI and the coupling check also run on PRs to `develop`. `CONTRIBUTING.md` rewritten, with a release process section.
+
+### Fixed
+
+- `session` tool `load_last` now returns an explicit error when no agent identity is available (`KARAKOS_AGENT` unset and no `agent` argument) and rejects path-like agent names, instead of guessing (Fixes #160, "session tool: load_last can return another agent's summary").
+- `bin/purge-data.py` derives the agent for session-summary retention by stripping the trailing timestamp, so hyphenated agent names such as `test-agent` get their own budget (Refs #156, "purge-data: hyphenated agent names share one session-summary budget"; the VACUUM-count part is not addressed here).
 
 ## [2.0.0] - 2026-10-03
 
