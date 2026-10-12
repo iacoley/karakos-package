@@ -14,6 +14,8 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-10-12
+
 ### Added
 
 - `./setup.sh --answers <file.json>` (also `install.sh --answers` and `KARAKOS_ANSWERS`) runs the wizard without prompts, with secrets readable from environment variables; example in `docs/answers.example.json`.
@@ -197,7 +199,9 @@ Initial release: an installable multi-agent household system — Discord
 integration, local dashboard, episodic memory, session persistence, cost
 tracking, and builder/reviewer agents behind guardrails.
 
-[Unreleased]: https://github.com/mcarmody/karakos-package/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/mcarmody/karakos-package/compare/v2.0.1...HEAD
+[2.0.1]: https://github.com/mcarmody/karakos-package/compare/v2.0.0...v2.0.1
+[2.0.0]: https://github.com/mcarmody/karakos-package/compare/v1.5.0...v2.0.0
 [1.5.0]: https://github.com/mcarmody/karakos-package/compare/v1.4.1...v1.5.0
 [1.4.1]: https://github.com/mcarmody/karakos-package/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/mcarmody/karakos-package/compare/v1.3...v1.4.0
