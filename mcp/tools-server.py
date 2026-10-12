@@ -824,8 +824,13 @@ def handle_core_tool(tool_name: str, args: dict) -> dict:
         elif action == "load_last":
             # The pending handoff note for this shard, if one is on disk.
             shard = (args.get("agent") or KARAKOS_SHARD or KARAKOS_AGENT).strip()
+            if not shard:
+                return {"error": "No agent identity (KARAKOS_AGENT unset); "
+                                 "cannot load a session summary"}
+            if "/" in shard or "\\" in shard or shard.startswith("."):
+                return {"error": f"Invalid agent name: {shard!r}"}
             path = WORKSPACE / "data" / "handoff" / f"{shard}.md"
-            if shard and path.is_file():
+            if path.is_file():
                 age_hours = (time.time() - path.stat().st_mtime) / 3600
                 return {"status": "success", "summary": path.read_text(),
                         "age_hours": round(age_hours, 1), "path": str(path)}

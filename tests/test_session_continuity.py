@@ -565,6 +565,29 @@ class TestMcpFinalize:
         out = tools_server.handle_core_tool("session", {"action": "load_last"})
         assert out == {"status": "not_found"}
 
+    def test_load_last_explicit_agent_returns_only_that_agents_note(self, tools_server, tmp_path):
+        """Fixes #160: load_last must never hand back another agent's summary."""
+        d = tmp_path / "data" / "handoff"
+        d.mkdir(parents=True)
+        (d / "amos.md").write_text("note for amos")
+        (d / "zed.md").write_text("note for zed")
+        out = tools_server.handle_core_tool("session", {"action": "load_last", "agent": "zed"})
+        assert out["summary"] == "note for zed"
+
+    def test_load_last_no_identity_is_an_explicit_error(self, tools_server, monkeypatch, tmp_path):
+        monkeypatch.setattr(tools_server, "KARAKOS_AGENT", "")
+        monkeypatch.setattr(tools_server, "KARAKOS_SHARD", "")
+        d = tmp_path / "data" / "handoff"
+        d.mkdir(parents=True)
+        (d / "zed.md").write_text("note for zed")
+        out = tools_server.handle_core_tool("session", {"action": "load_last"})
+        assert "error" in out and "KARAKOS_AGENT" in out["error"]
+        assert "summary" not in out
+
+    def test_load_last_rejects_path_traversal(self, tools_server):
+        out = tools_server.handle_core_tool("session", {"action": "load_last", "agent": "../x"})
+        assert "error" in out
+
     def test_the_tool_schema_accepts_an_agent(self, tools_server):
         session_tool = next(t for t in tools_server.CORE_TOOLS if t["name"] == "session")
         assert "agent" in session_tool["inputSchema"]["properties"]

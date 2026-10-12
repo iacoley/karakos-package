@@ -94,6 +94,25 @@ class TestPurgeSessionSummaries:
         remaining = list(summaries_dir.glob("agent1-*.md"))
         assert len(remaining) == 3
 
+    def test_hyphenated_agent_names_get_their_own_budget(self, tmp_workspace, monkeypatch):
+        """Refs #156 (purge-data: hyphenated agent names share one budget)."""
+        purge = self._make_purger(tmp_workspace, monkeypatch)
+        summaries_dir = tmp_workspace / "logs" / "session-summaries"
+        for agent in ("test-agent", "test-other"):
+            for i in range(4):
+                f = summaries_dir / f"{agent}-2026-10-0{i + 1}-120000.md"
+                f.write_text("x")
+                t = time.time() - (4 - i) * 3600
+                os.utime(f, (t, t))
+        assert purge.purge_old_session_summaries() == 2
+        assert len(list(summaries_dir.glob("test-agent-*.md"))) == 3
+        assert len(list(summaries_dir.glob("test-other-*.md"))) == 3
+
+    def test_summary_agent_strips_trailing_timestamp(self, tmp_workspace, monkeypatch):
+        purge = self._make_purger(tmp_workspace, monkeypatch)
+        assert purge._summary_agent("test-agent-2026-10-09-120000") == "test-agent"
+        assert purge._summary_agent("amos-2026-10-09-120000") == "amos"
+
     def test_handles_empty_directory(self, tmp_workspace, monkeypatch):
         purge = self._make_purger(tmp_workspace, monkeypatch)
         deleted = purge.purge_old_session_summaries()
