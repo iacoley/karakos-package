@@ -33,11 +33,13 @@ if [ "$1" = "--sleep" ]; then
   start=$(date +%s)
   while true; do
     elapsed=$(( $(date +%s) - start ))
-    [ "$elapsed" -ge "$DELAY" ] && break
+    # date +%s is whole seconds, so a diff of T can be as little as T-1 real seconds; -gt guarantees we never finish early (at most ~1s late).
+    [ "$elapsed" -gt "$DELAY" ] && break
     remaining=$(( DELAY - elapsed ))
     # Cap each nap at 5s so a long delay can still be interrupted/observed
     # in reasonable increments, but never oversleep a short one.
     [ "$remaining" -gt 5 ] && remaining=5
+    [ "$remaining" -lt 1 ] && remaining=1
     sleep "$remaining"
   done
   exit 0
@@ -146,7 +148,8 @@ while true; do
     [ -n "$TAIL_FILE" ] && [ -r "$TAIL_FILE" ] && { echo "--- tail $TAIL_FILE ---"; tail -n 20 "$TAIL_FILE"; }
     exit 0
   fi
-  if [ $(( $(date +%s) - start )) -ge "$TIMEOUT" ]; then
+  # date +%s is whole seconds, so a diff of T can be as little as T-1 real seconds; -gt guarantees we never time out early (at most ~1s late).
+  if [ $(( $(date +%s) - start )) -gt "$TIMEOUT" ]; then
     echo "wait-for: TIMEOUT after ${TIMEOUT}s waiting for: $CONDITION" >&2
     [ -n "$TAIL_FILE" ] && [ -r "$TAIL_FILE" ] && { echo "--- tail $TAIL_FILE ---" >&2; tail -n 20 "$TAIL_FILE" >&2; }
     exit 124
