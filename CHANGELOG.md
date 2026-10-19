@@ -14,6 +14,8 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-10-19
+
 ### Changed
 
 - Agents see where each message was posted: the batch line carries the channel name, channel id and server (Discord guild name, or `dm`), printed once per run of same-channel rows. A thread reads as `parent/thread`. Channels missing from `channels.json` show their Discord name instead of `unknown`. Queue rows for Discord messages now store the guild name in `server` rather than `discord`; `server` is also what the edit-reroute lookup matches on, so the relay's edit and reaction paths send the same value.
@@ -231,7 +233,8 @@ Initial release: an installable multi-agent household system — Discord
 integration, local dashboard, episodic memory, session persistence, cost
 tracking, and builder/reviewer agents behind guardrails.
 
-[Unreleased]: https://github.com/mcarmody/karakos-package/compare/v2.0.2...HEAD
+[Unreleased]: https://github.com/mcarmody/karakos-package/compare/v2.1.0...develop
+[2.1.0]: https://github.com/mcarmody/karakos-package/compare/v2.0.2...v2.1.0
 [2.0.2]: https://github.com/mcarmody/karakos-package/compare/v2.0.1...v2.0.2
 [2.0.1]: https://github.com/mcarmody/karakos-package/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/mcarmody/karakos-package/compare/v1.5.0...v2.0.0
