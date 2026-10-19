@@ -70,6 +70,8 @@ BUILTIN = [
     Job("purge", "job", Daily("04:30"), "scheduler:purge_old_data", 48 * H),
     Job("update-check", "job", Weekly("mon", "05:00"), "scheduler:check_updates", 14 * 24 * H),
     Job("monitor-tick", "job", Every(60), "monitor_tick:run", 300),
+    Job("friction-sensor", "job", Every(3600, 600),
+        "monitor_jobs.friction_sensor:run_scheduled", 3 * H),
     Job("scheduler", "component", None, None, 300, critical=True),
     Job("mcp-tools", "component", None, None, 600, critical=True),
     Job("relay", "component", None, None, 300, critical=True),

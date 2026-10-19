@@ -50,6 +50,7 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Friction sensor (no LLM): `lib/friction.py`, `bin/friction-sensor.py` and an hourly `friction-sensor` job scan the agent stream logs for tool errors, non-zero Bash exits, denials, rate-limit pressure and repeated commands, append to `data/friction-log.jsonl` and refresh `data/friction/weekly.md`. Read-only: nothing edits a prompt or persona. (Refs #237, build A; the nightly review and `friction` MCP action are build B)
 - `./setup.sh --answers <file.json>` (also `install.sh --answers` and `KARAKOS_ANSWERS`) runs the wizard without prompts, with secrets readable from environment variables; example in `docs/answers.example.json`.
 - `AGENTS.md` and `docs/AGENT_GUIDE.md`, an entry point and operating guide for coding agents (install, self-repair, self-improve, contribute upstream). `CLAUDE.md` imports `AGENTS.md`.
 
