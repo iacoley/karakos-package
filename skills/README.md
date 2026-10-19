@@ -15,6 +15,38 @@ Skills are modular extensions that add tools to the Karakos MCP server. Each ski
 
 ---
 
+## Procedure skills
+
+Not every skill needs code. A **procedure skill** is a directory with only a
+`SKILL.md` (no `tools.json`, no `scripts/`) whose frontmatter has `name` and
+`description`:
+
+```markdown
+---
+name: restart-and-recover
+description: Restart a stuck agent and confirm it recovered
+---
+
+1. Check `get_health`. ...
+```
+
+`name` must equal the directory name (lowercase letters, digits, `-`, `_`).
+It adds no MCP tools. Agents find and read these through the `skill` tool:
+
+- `skill {action: list}`: every skill under `skills/`, tool and procedure, with its description
+- `skill {action: read, name}`: the `SKILL.md` text
+- `skill {action: validate, name}`: checks the frontmatter, and for a tool skill
+  `tools.json` (required keys, `inputSchema` is an object, a script named after
+  each tool or `main.*`) and then runs `mcp/tools-server.py --test-tool` for each
+  tool in a subprocess with a 20 second timeout (empty arguments)
+
+A `SKILL.md` without `name` and `description` is skipped with a message on stderr.
+Skills you add to `skills/` for your own install are yours; what touches `bin/`,
+`lib/` or `mcp/` goes upstream as a PR. For a private install, keep them in the
+overlay (`docs/OVERLAY.md`).
+
+---
+
 ## Directory Structure
 
 Every skill follows this structure:

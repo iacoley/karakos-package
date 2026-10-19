@@ -341,6 +341,24 @@ CORE_TOOLS = [
         }
     },
     {
+        "name": "skill",
+        "description": (
+            "Procedure skills and skill checks. list: every skill under skills/ "
+            "(procedure skills are a SKILL.md with name/description frontmatter, "
+            "instructions only). read: the SKILL.md of one skill. validate: check "
+            "frontmatter, tools.json, script names, and run --test-tool for tool skills."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["list", "read", "validate"],
+                           "description": "The action to perform"},
+                "name": {"type": "string", "description": "Skill directory name (read, validate)"},
+            },
+            "required": ["action"],
+        },
+    },
+    {
         "name": "vault",
         "description": "Git-backed knowledge vault. Actions: pull (sync from remote), push (sync to remote), status (show git status).",
         "inputSchema": {
@@ -544,11 +562,15 @@ def discover_skills() -> list[dict]:
         if not tools_file.exists():
             skill_md = skill_dir / "SKILL.md"
             if skill_md.exists():
+                from lib.procedure_skills import parse_frontmatter
+                fm = parse_frontmatter(skill_md.read_text(errors="replace")) or {}
+                if fm.get("name") and fm.get("description"):
+                    continue  # procedure skill: indexed by the `skill` tool, no MCP tools
                 sys.stderr.write(
                     f"Skipping {skill_md}: no tools.json in {skill_dir}. "
-                    "This server only loads the tools.json + scripts/ skill "
-                    "convention (docs/EXTENDING.md); frontmatter-only "
-                    "SKILL.md files are not discovered.\n"
+                    "Tool skills need tools.json + scripts/ (docs/EXTENDING.md); "
+                    "procedure skills need name and description frontmatter "
+                    "in SKILL.md (skills/README.md).\n"
                 )
             continue
         try:
@@ -992,6 +1014,21 @@ def handle_core_tool(tool_name: str, args: dict) -> dict:
                 except json.JSONDecodeError:
                     continue
             return {"messages": messages[-limit:], "channel": channel}
+
+    elif tool_name == "skill":
+        from lib import procedure_skills as ps
+        action = args.get("action")
+        try:
+            if action == "list":
+                return {"skills": ps.scan(SKILLS_DIR)}
+            if action == "read":
+                return ps.read(SKILLS_DIR, args.get("name"))
+            if action == "validate":
+                return ps.validate(SKILLS_DIR, args.get("name"),
+                                   server=Path(__file__).resolve(), workspace=WORKSPACE)
+        except (ValueError, LookupError) as e:
+            return {"error": str(e)}
+        return {"error": f"Unknown skill action: {action}"}
 
     elif tool_name == "taskboard":
         # Simple file-based task tracking
