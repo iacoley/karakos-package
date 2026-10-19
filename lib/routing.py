@@ -16,7 +16,15 @@ class Route:
 
 
 def route_message(registry, channel_name, mentioned_agent, is_bot,
-                  channel_opt_out=False, parent_channel_name=None) -> Optional[Route]:
+                  channel_opt_out=False, parent_channel_name=None,
+                  mention_only=False) -> Optional[Route]:
+    """Decide which shard, if any, receives a message.
+
+    `mention_only` (a channel's `"mention_only": true`) routes on an explicit
+    mention and nothing else: no channel ownership, no primary fallback. It is
+    checked after the mention rule, so a mention still routes, and it wins over
+    both the channel's owner and the primary fallback.
+    """
     # 1. Not in channels.json: never routed, mention or not (B24). A thread has
     # its own id, never listed: it resolves through its parent's name first, so
     # a thread under an unlisted parent is still refused.
@@ -33,6 +41,10 @@ def route_message(registry, channel_name, mentioned_agent, is_bot,
         theirs = registry.shards_of(mentioned_agent)
         if theirs:
             return Route(theirs[0].id, theirs[0].agent, "mention")
+
+    # 2b. A mention_only channel answers mentions and nothing else.
+    if mention_only:
+        return None
 
     # 3. A bot never routes on a channel default.
     if is_bot:

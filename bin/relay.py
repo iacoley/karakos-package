@@ -574,6 +574,7 @@ agent_config: Dict = {}
 channels_config: Dict = {}
 registry_obj = None
 discord_id_to_agent: Dict[int, str] = {}
+discord_role_id_to_agent: Dict[int, str] = {}
 active_dispatches: Dict[str, asyncio.Task] = {}
 dispatch_semaphores: Dict[str, asyncio.Semaphore] = {}
 
@@ -603,7 +604,7 @@ def spool_deferred_message(payload: dict, reason: str) -> Optional[Path]:
 
 def load_config():
     """Load agent and channel configuration"""
-    global agent_config, channels_config, discord_id_to_agent, registry_obj
+    global agent_config, channels_config, discord_id_to_agent, discord_role_id_to_agent, registry_obj
 
     # Load agents (config/agents.yaml via the registry; no legacy fallback)
     try:
@@ -631,6 +632,16 @@ def load_config():
             bot_id = os.environ.get(bot_id_env)
             if bot_id:
                 discord_id_to_agent[int(bot_id)] = agent_name
+        role_id_env = config.get("discord_role_id_env")
+        if role_id_env:
+            role_id = os.environ.get(role_id_env)
+            if role_id:
+                discord_role_id_to_agent[int(role_id)] = agent_name
+
+    for name, cfg in (channels_config.get("channels") or {}).items():
+        if isinstance(cfg, dict) and cfg.get("mention_only") is True and cfg.get("reply_gate"):
+            log.error(f"channel '{name}' sets both mention_only and reply_gate; "
+                      f"treating it as mention_only (reply_gate ignored)")
 
     _config_state["mtimes"] = _config_mtimes()
     log.info(f"Loaded config for {len(agent_config)} agents, {len(channels_config.get('channels', {}))} channels")
@@ -667,7 +678,8 @@ def maybe_reload_config():
     current = _config_mtimes()
     if current == st["mtimes"]:
         return
-    saved = (agent_config, channels_config, registry_obj, dict(discord_id_to_agent))
+    saved = (agent_config, channels_config, registry_obj, dict(discord_id_to_agent),
+             dict(discord_role_id_to_agent))
     try:
         load_config()
         if registry_obj is None:
@@ -677,6 +689,8 @@ def maybe_reload_config():
         agent_config, channels_config, registry_obj = saved[:3]
         discord_id_to_agent.clear()
         discord_id_to_agent.update(saved[3])
+        discord_role_id_to_agent.clear()
+        discord_role_id_to_agent.update(saved[4])
         if st["failed"] != current:
             log.error(f"config reload failed, keeping previous config: {e}")
         st["failed"] = current
@@ -942,11 +956,18 @@ class DiscordAdapter(discord.Client):
             channel_config = channels_config.get("channels", {}).get(channel_name, {}) or {}
 
         # The mentioned agent (if any); routing is decided below.
+        mention_only = channel_config.get("mention_only") is True
         target_agent = None
         for mention in message.mentions:
             if mention.bot and mention.id in discord_id_to_agent:
                 target_agent = discord_id_to_agent[mention.id]
                 break
+        if target_agent is None:
+            for role in getattr(message, "role_mentions", None) or ():
+                agent = discord_role_id_to_agent.get(role.id)
+                if agent:
+                    target_agent = agent
+                    break
 
         # System commands run here, not in the agent. An agent that has stopped
         # reading its queue cannot process its own `/clear`, and that is the
@@ -977,7 +998,7 @@ class DiscordAdapter(discord.Client):
             self.guest_budget.reset(message.channel.id)
 
             raw_gate = channel_config.get("reply_gate")
-            if raw_gate:
+            if raw_gate and not mention_only:
                 gate_cfg = reply_gate_config.parse(raw_gate)
                 replied_to = None
                 ref = getattr(message, "reference", None)
@@ -1024,6 +1045,7 @@ class DiscordAdapter(discord.Client):
             registry_obj, own_name, target_agent, bool(message.author.bot),
             channel_opt_out=channel_config.get("route") is False,
             parent_channel_name=parent_name,
+            mention_only=mention_only,
         ) if registry_obj is not None else None
         if route is None:
             return  # No routing
@@ -1730,6 +1752,7 @@ class DiscordAdapter(discord.Client):
         route = routing.route_message(
             registry_obj, name, agent, False,
             channel_opt_out=(channels_config.get("channels", {}).get(name) or {}).get("route") is False,
+            mention_only=(channels_config.get("channels", {}).get(name) or {}).get("mention_only") is True,
         ) if registry_obj is not None else None
         if route is None:
             return
@@ -1959,7 +1982,9 @@ class DiscordAdapter(discord.Client):
             "is_bot": message.author.bot,
             "content": content,
             "message_id": str(message.id),
-            "mentions_agent": any(m.id in discord_id_to_agent for m in message.mentions),
+            "mentions_agent": any(m.id in discord_id_to_agent for m in message.mentions) or any(
+                r.id in discord_role_id_to_agent
+                for r in getattr(message, "role_mentions", None) or ()),
             "attachments": attachments,
         }
         if thread_parent:

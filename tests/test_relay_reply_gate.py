@@ -106,15 +106,27 @@ class FakeGuild:
     id = 42
 
 
+class FakeRole:
+    def __init__(self, role_id):
+        self.id = role_id
+
+
 class FakeMessage:
     def __init__(self, author_id, content="", bot=False, channel_id=GATED_CHANNEL,
-                 mentions=(), replied_to=None):
+                 mentions=(), replied_to=None, role_mentions=()):
         self.author = FakeAuthor(author_id, bot=bot)
         self.channel = FakeChannel(channel_id)
         self.content = content
         self.mentions = list(mentions)
+        self.role_mentions = list(role_mentions)
         self.reference = FakeRef(replied_to) if replied_to is not None else None
         self.guild = FakeGuild()
+
+
+MENTION_ONLY_CHANNEL = 8000
+BOTH_KEYS_CHANNEL = 8100
+ROLE_ID = 777          # maps to amos
+UNMAPPED_ROLE_ID = 778
 
 
 CHANNELS = {
@@ -124,6 +136,10 @@ CHANNELS = {
         "general": {"id": str(PLAIN_CHANNEL), "default_agent": "amos"},
         "agent-chat": {"id": str(GUEST_CHANNEL), "default_agent": "amos",
                        "guest_agents": True},
+        "front-desk": {"id": str(MENTION_ONLY_CHANNEL), "default_agent": "amos",
+                       "mention_only": True},
+        "both-keys": {"id": str(BOTH_KEYS_CHANNEL), "default_agent": "amos",
+                      "reply_gate": True, "mention_only": True},
     },
 }
 
@@ -137,10 +153,12 @@ def adapter(relay, monkeypatch):
     monkeypatch.setattr(relay, "registry_obj", registry.parse_registry({
         "version": 2, "agents": {
             "amos": {"name": "amos", "role": "primary", "shards": [
-                {"id": "amos", "channels": ["kitchen", "general", "agent-chat"]}]},
+                {"id": "amos", "channels": ["kitchen", "general", "agent-chat",
+                                            "front-desk", "both-keys"]}]},
             "kothar": {"name": "kothar", "role": "monitor"}}}))
     monkeypatch.setattr(relay, "discord_id_to_agent",
                         {AMOS_BOT_ID: "amos", KOTHAR_BOT_ID: "kothar"})
+    monkeypatch.setattr(relay, "discord_role_id_to_agent", {ROLE_ID: "amos"})
 
     # discord.Client.user is a read-only property, so the identity of "us" has
     # to be supplied by a subclass rather than assigned.
@@ -406,3 +424,104 @@ def test_messages_from_other_servers_are_still_ignored(adapter):
     msg.guild = type("OtherGuild", (), {"id": 777})()
     deliver(adapter, msg)
     assert adapter.routed == []
+
+
+# ---------------------------------------------------------------------------
+# mention_only channels — answer a direct or role mention, nothing else
+# ---------------------------------------------------------------------------
+
+def test_mention_only_plain_message_is_silent_even_with_a_shard_owning_it(adapter):
+    """amos owns front-desk through its shard; ownership alone does not route."""
+    deliver(adapter, FakeMessage(MIKE, "what's for dinner", channel_id=MENTION_ONLY_CHANNEL))
+    assert adapter.routed == []
+
+
+def test_mention_only_reply_to_the_agent_is_silent(adapter):
+    deliver(adapter, FakeMessage(MIKE, "no, the other one", channel_id=MENTION_ONLY_CHANNEL,
+                                 replied_to=AMOS_BOT_ID))
+    assert adapter.routed == []
+
+
+def test_mention_only_name_opener_is_silent(adapter):
+    deliver(adapter, FakeMessage(MIKE, "amos, add milk", channel_id=MENTION_ONLY_CHANNEL))
+    assert adapter.routed == []
+
+
+def test_mention_only_user_mention_routes(adapter):
+    deliver(adapter, FakeMessage(MIKE, "<@111> add milk", channel_id=MENTION_ONLY_CHANNEL,
+                                 mentions=mention_amos()))
+    assert adapter.routed == [("amos", "<@111> add milk")]
+
+
+def test_mention_only_role_mention_routes(adapter):
+    deliver(adapter, FakeMessage(MIKE, "<@&777> add milk", channel_id=MENTION_ONLY_CHANNEL,
+                                 role_mentions=[FakeRole(ROLE_ID)]))
+    assert adapter.routed == [("amos", "<@&777> add milk")]
+
+
+def test_mention_only_unmapped_role_mention_is_silent(adapter):
+    deliver(adapter, FakeMessage(MIKE, "<@&778> add milk", channel_id=MENTION_ONLY_CHANNEL,
+                                 role_mentions=[FakeRole(UNMAPPED_ROLE_ID)]))
+    assert adapter.routed == []
+
+
+def test_mention_only_beats_reply_gate_when_both_are_set(adapter):
+    """A channel that sets both keys is mention_only: no gate, no name-opener."""
+    deliver(adapter, FakeMessage(MIKE, "amos, add milk", channel_id=BOTH_KEYS_CHANNEL))
+    deliver(adapter, FakeMessage(MIKE, "anyone want lunch", channel_id=BOTH_KEYS_CHANNEL))
+    assert adapter.routed == []
+    deliver(adapter, FakeMessage(MIKE, "<@111> lunch?", channel_id=BOTH_KEYS_CHANNEL,
+                                 mentions=mention_amos()))
+    assert adapter.routed == [("amos", "<@111> lunch?")]
+
+
+def test_load_config_logs_the_conflict_and_keeps_going(relay, monkeypatch, tmp_path):
+    """Both keys on one channel: an error is logged at load, nothing crashes."""
+    import json
+    import registry
+
+    class Recorder:
+        def __init__(self):
+            self.errors = []
+
+        def error(self, msg, *a, **k):
+            self.errors.append(msg)
+
+        def __getattr__(self, name):
+            return lambda *a, **k: None
+
+    chan_file = tmp_path / "channels.json"
+    chan_file.write_text(json.dumps(CHANNELS))
+    recorder = Recorder()
+    monkeypatch.setattr(relay, "log", recorder)
+    monkeypatch.setattr(relay, "CHANNELS_CONFIG_PATH", chan_file)
+    monkeypatch.setattr(relay.agent_registry, "load_registry", lambda ws: registry.parse_registry({
+        "version": 2, "agents": {
+            "amos": {"name": "amos", "role": "primary", "shards": [
+                {"id": "amos", "channels": ["both-keys"]}]},
+            "kothar": {"name": "kothar", "role": "monitor"}}}))
+    monkeypatch.setattr(relay, "discord_id_to_agent", {})
+    monkeypatch.setattr(relay, "discord_role_id_to_agent", {})
+
+    relay.load_config()
+
+    assert any("both-keys" in e and "mention_only" in e for e in recorder.errors)
+    assert not any("front-desk" in e for e in recorder.errors)
+
+
+def test_role_id_env_is_read_from_the_registry_into_the_relay_map(relay, monkeypatch, tmp_path):
+    import registry
+    monkeypatch.setenv("DISCORD_ROLE_ID_AMOS", str(ROLE_ID))
+    monkeypatch.setattr(relay.agent_registry, "load_registry", lambda ws: registry.parse_registry({
+        "version": 2, "agents": {
+            "amos": {"name": "amos", "role": "primary",
+                     "discord": {"role_id_env": "DISCORD_ROLE_ID_AMOS"},
+                     "shards": [{"id": "amos", "channels": []}]},
+            "kothar": {"name": "kothar", "role": "monitor"}}}))
+    monkeypatch.setattr(relay, "discord_id_to_agent", {})
+    monkeypatch.setattr(relay, "discord_role_id_to_agent", {})
+    monkeypatch.setattr(relay, "CHANNELS_CONFIG_PATH", tmp_path / "channels.json")
+
+    relay.load_config()
+
+    assert relay.discord_role_id_to_agent == {ROLE_ID: "amos"}
