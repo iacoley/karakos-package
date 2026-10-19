@@ -16,6 +16,7 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Self-management tools in the `karakos-admin` MCP server: `get_usage`, `get_cost`, `tail_log`, `set_effort`, `get_queue`, `pause_agent`, `resume_agent` and `get_findings`. An agent may reload, reset, set effort on, pause or resume only itself, unless it is the primary or the call is an operator's. (Refs #232, "MÍRDAIN G1: `self` ops surface in the admin MCP")
 - Friction review (no LLM): `lib/friction_review.py`, `bin/friction-review.py` and a nightly `friction-review` job group the friction log into recurring causes and write `data/friction/YYYY-MM-DD.md` with a drafted issue and proposed fix each. Nothing is filed or edited automatically: `--file --yes` is the explicit, once-per-cause approval step, and only for causes seen on two separate days. (Refs #237, build B; the `friction` MCP action is a follow-up)
 - Friction sensor (no LLM): `lib/friction.py`, `bin/friction-sensor.py` and an hourly `friction-sensor` job scan the agent stream logs for tool errors, non-zero Bash exits, denials, rate-limit pressure and repeated commands, append to `data/friction-log.jsonl` and refresh `data/friction/weekly.md`. Read-only: nothing edits a prompt or persona. (Refs #237, build A; the nightly review and `friction` MCP action are build B)
 - `bin/self-test.py`: runs `bin/self-diagnose.py`, then starts both MCP servers over stdio and calls one read-only tool on each; PASS/FAIL per step, `--json`, exit 0/1. (Refs #236, part 2; builds on the `bin/self-diagnose.py` PR)
