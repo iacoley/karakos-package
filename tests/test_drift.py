@@ -55,3 +55,15 @@ def test_components():
     assert keys(drift_report([C], None, {"c": None}, START, NOW)) == ["component-missing:c"]
     # inside boot grace a missing component is not reported
     assert drift_report([C], None, {"c": None}, NOW - timedelta(seconds=30), NOW) == []
+
+
+def test_no_job_late_when_scheduler_restarted_between_runs():
+    # previous run (now-200s) predates the restart (now-100s): the gap is a restart, not lateness
+    hbs = {"j": {"timestamp": ts(0), "ok": True, "previous_timestamp": ts(200)}}
+    assert drift_report([J], live("j"), hbs, NOW - timedelta(seconds=100), NOW) == []
+
+
+def test_job_late_when_previous_run_is_after_scheduler_start():
+    # previous run (now-200s) is after the scheduler started (now-1000s): a real late run
+    hbs = {"j": {"timestamp": ts(0), "ok": True, "previous_timestamp": ts(200)}}
+    assert keys(drift_report([J], live("j"), hbs, NOW - timedelta(seconds=1000), NOW)) == ["job-late:j"]

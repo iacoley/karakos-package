@@ -36,7 +36,8 @@ def drift_report(jobs, live, hbs, started_at, now) -> list:
                             f"job {job.name} last run failed: {(hb or {}).get('detail', '')}", since))
         if isinstance(job.schedule, Every) and hb and not hb.get("corrupt"):
             a, b = heartbeats.parse_ts(hb.get("timestamp")), heartbeats.parse_ts(hb.get("previous_timestamp"))
-            if a and b and (a - b).total_seconds() > 2 * job.schedule.seconds:
+            restarted_between = started_at is not None and b is not None and b < started_at
+            if a and b and not restarted_between and (a - b).total_seconds() > 2 * job.schedule.seconds:
                 out.append(make("job-late", job.name, "warn",
                                 f"job {job.name} last two runs were {(a - b).total_seconds():.0f}s apart "
                                 f"(interval {job.schedule.seconds}s)", since))

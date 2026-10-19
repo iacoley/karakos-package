@@ -118,3 +118,15 @@ def test_validate_args_rejects_unknown_action_and_non_string_content(tools_serve
     assert "content" in tools_server.validate_args({"action": "write", "content": 5}, schema)
     gschema = _core(tools_server, "graph")["inputSchema"]
     assert tools_server.validate_args({"action": "bogus"}, gschema)
+
+
+def test_health_loop_exists_and_write_health_writes_timestamp(tools_server, monkeypatch, tmp_path):
+    """_health_loop is the background refresher; it is not started here (infinite loop).
+    One write_health() call must produce the health file the monitor reads."""
+    import json as _json
+
+    assert callable(tools_server._health_loop)
+    health = tmp_path / "data" / "health" / "mcp-tools.json"
+    monkeypatch.setattr(tools_server, "HEALTH_FILE", health)
+    tools_server.write_health()
+    assert "timestamp" in _json.loads(health.read_text())

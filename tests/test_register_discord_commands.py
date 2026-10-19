@@ -181,3 +181,39 @@ def test_missing_env_var_fails_loudly_instead_of_a_bad_request(missing, fake_dis
 
     assert result.returncode != 0
     assert missing in result.stderr
+
+
+def test_request_sends_discord_bot_user_agent(monkeypatch):
+    """Discord answers 403 'error code: 1010' to requests with no User-Agent,
+    so _request must always send one in the DiscordBot (...) form."""
+    import importlib.util
+    import urllib.request
+
+    spec = importlib.util.spec_from_file_location("register_discord_commands", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    seen = {}
+
+    class _Resp:
+        status = 200
+
+        def read(self):
+            return b"[]"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def fake_urlopen(req, timeout=None):
+        seen["req"] = req
+        return _Resp()
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    status, body = module._request("GET", "https://example.invalid/api", "tok")
+
+    ua = seen["req"].get_header("User-agent")
+    assert ua and ua.startswith("DiscordBot ("), ua
+    assert status == 200 and body == []

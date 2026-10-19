@@ -110,6 +110,7 @@ def _request(method: str, url: str, token: str, payload=None):
         headers={
             "Authorization": f"Bot {token}",
             "Content-Type": "application/json",
+            "User-Agent": "DiscordBot (https://github.com/mcarmody/karakos-package, 2)",
         },
     )
     try:

@@ -516,6 +516,7 @@ ATTACHMENTS_DIR = WORKSPACE_ROOT / "data" / "attachments"
 # be refused identically on every refire.
 DEFERRED_MESSAGES_DIR = WORKSPACE_ROOT / "data" / "deferred-messages"
 HEALTH_FILE = WORKSPACE_ROOT / "data" / "health" / "relay.json"
+HEALTH_INTERVAL_S = 60
 
 # Attachments the relay will pull down before handing a message to an agent.
 # Discord's own ceiling is 25 MB on an unboosted server, so the default cap
@@ -828,6 +829,7 @@ class DiscordAdapter(discord.Client):
         self.guest_budget = GuestBudget()
         self.presence = PresenceTracker()
         self._presence_task = None
+        self._health_task = None
 
     async def setup_hook(self):
         """Initialize HTTP session"""
@@ -843,6 +845,8 @@ class DiscordAdapter(discord.Client):
         """Bot logged in"""
         log.info(f"Discord bot ready as {self.user.name} (ID: {self.user.id})")
         await self.write_health_heartbeat()
+        if self._health_task is None or self._health_task.done():
+            self._health_task = asyncio.create_task(self.health_loop())
         self.start_presence_loop()
 
     async def on_resumed(self):
@@ -2007,15 +2011,23 @@ class DiscordAdapter(discord.Client):
             HEALTH_FILE.parent.mkdir(parents=True, exist_ok=True)
             with open(HEALTH_FILE, "w") as f:
                 json.dump({
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     "status": "healthy",
                     "reply_gate": dict(self.reply_gate.stats),
                 }, f)
         except OSError as e:
             log.debug("health heartbeat failed: %s", e)
 
+    async def health_loop(self):
+        """Refresh relay.json so the monitor's 300 s staleness check sees a live relay."""
+        while True:
+            await self.write_health_heartbeat()
+            await asyncio.sleep(HEALTH_INTERVAL_S)
+
     async def close(self):
         """Cleanup on shutdown"""
+        if self._health_task:
+            self._health_task.cancel()
         if self._presence_task:
             self._presence_task.cancel()
         if self.http_session:

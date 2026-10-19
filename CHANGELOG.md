@@ -14,6 +14,13 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Relay refreshes `relay.json` every 60 s from a background task, so the monitor's 300 s staleness check no longer pages on a quiet relay; the heartbeat timestamp is now UTC. (Refs #228, "v2.0.0 fresh-install defects from Babybel live-fire check")
+- MCP tools server refreshes `mcp-tools.json` every 120 s while it runs (not in `--test-tool` mode), so the 600 s staleness check no longer pages on a quiet server. (Refs #228, "v2.0.0 fresh-install defects from Babybel live-fire check")
+- Drift check no longer reports `job-late` for a job whose two most recent runs straddle a scheduler restart. (Refs #228, "v2.0.0 fresh-install defects from Babybel live-fire check")
+- `register-discord-commands.py` sends a `User-Agent` header, so slash-command registration no longer fails with HTTP 403 "error code: 1010". (Refs #228, "v2.0.0 fresh-install defects from Babybel live-fire check")
+
 ## [2.0.1] - 2026-10-12
 
 ### Added

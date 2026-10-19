@@ -11,6 +11,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -24,6 +25,7 @@ from _handshake import initialize_result  # noqa: E402
 WORKSPACE = Path(os.environ.get("WORKSPACE_ROOT", "/workspace"))
 SKILLS_DIR = WORKSPACE / "skills"
 HEALTH_FILE = WORKSPACE / "data" / "health" / "mcp-tools.json"
+HEALTH_INTERVAL_S = 120
 AUDIT_DB_PATH = WORKSPACE / "data" / "mcp-tools-audit.db"
 
 # Maximum payload size for tool arguments
@@ -481,6 +483,16 @@ def write_health():
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "status": "healthy",
     }))
+
+
+def _health_loop():
+    """Keep mcp-tools.json fresh while this server is alive (monitor threshold 600 s)."""
+    while True:
+        try:
+            write_health()
+        except OSError:
+            pass
+        time.sleep(HEALTH_INTERVAL_S)
 
 
 # =============================================================================
@@ -1085,6 +1097,8 @@ def main():
         result = handle_core_tool(tool_name, args) if tool_name in [t["name"] for t in CORE_TOOLS] else handle_skill_tool(tool_registry[tool_name], args)
         print(json.dumps(result, indent=2))
         sys.exit(0)
+
+    threading.Thread(target=_health_loop, name="mcp-tools-health", daemon=True).start()
 
     # Main JSON-RPC loop
     for line in sys.stdin:
