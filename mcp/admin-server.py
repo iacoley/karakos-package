@@ -13,6 +13,17 @@ Tools:
   - reset_agent       POST /agents/{name}/reset       (destructive)
   - create_agent      shells bin/create-agent.sh, optionally overwrites
                       SYSTEM_PROMPT.md and reloads
+  - get_usage         GET  /usage
+  - get_cost          GET  /cost, or /cost/{agent}
+  - tail_log          last N lines of logs/<service>.log (redacted)
+  - set_effort        POST /agents/{name}/effort      (self-scoped)
+  - get_queue         GET  /agents/{name}/queue
+  - pause_agent       POST /agents/{name}/pause       (self-scoped)
+  - resume_agent      POST /agents/{name}/resume      (self-scoped)
+  - get_findings      data/health/summary.md
+
+Self-scoped tools (reload, reset, effort, pause, resume) let an agent act on
+itself only; a primary agent or an operator (no KARAKOS_AGENT) may act on any.
 
 No SDK dependency — manual JSON-RPC over stdio (initialize, tools/list,
 tools/call, notifications/initialized) so we don't add another dep to
@@ -26,6 +37,7 @@ import os
 import re
 import subprocess
 import sys
+from collections import deque
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _handshake import initialize_result  # noqa: E402
@@ -38,6 +50,11 @@ TOKEN = os.environ.get("AGENT_SERVER_TOKEN", "")
 CREATE_AGENT_SH = WORKSPACE_ROOT / "bin" / "create-agent.sh"
 
 NAME_RE = re.compile(r"^[a-z][a-z0-9-]*$")
+SERVICE_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+EFFORT_LEVELS = ("low", "medium", "high", "xhigh", "max", "default")
+TAIL_DEFAULT = 40
+TAIL_MAX = 200
+PAUSE_MIN, PAUSE_MAX = 1, 1440
 PROTOCOL_VERSION = "2024-11-05"
 
 
@@ -85,6 +102,7 @@ def tool_reload_agent(args: dict) -> dict:
     name = args.get("name")
     if not name or not NAME_RE.match(name):
         raise ValueError(f"invalid agent name: {name!r}")
+    _check_scope(name)
     return _http("POST", f"/agents/{name}/reload")
 
 
@@ -94,6 +112,7 @@ def tool_reset_agent(args: dict) -> dict:
     name = args.get("name")
     if not name or not NAME_RE.match(name):
         raise ValueError(f"invalid agent name: {name!r}")
+    _check_scope(name)
     return _http("POST", f"/agents/{name}/reset")
 
 
@@ -137,6 +156,120 @@ def tool_create_agent(args: dict) -> dict:
             result["reload_warning"] = str(exc)
 
     return result
+
+
+def _agent_name(value) -> str:
+    if not isinstance(value, str) or not NAME_RE.match(value):
+        raise ValueError(f"invalid agent name: {value!r}")
+    return value
+
+
+def _caller() -> str:
+    """Agent identity of the caller; empty for an operator or CLI."""
+    return os.environ.get("KARAKOS_AGENT", "").strip()
+
+
+def _role_of(agent: str) -> str | None:
+    """agents.<agent>.role from config/agents.yaml; None on any read error."""
+    try:
+        import yaml  # PyYAML, in requirements.txt; a missing module means role unknown
+        data = yaml.safe_load((WORKSPACE_ROOT / "config" / "agents.yaml").read_text()) or {}
+        role = ((data.get("agents") or {}).get(agent) or {}).get("role")
+    except Exception:  # noqa: BLE001 - unreadable or malformed registry: role unknown
+        return None
+    return role if isinstance(role, str) else None
+
+
+def _check_scope(name: str) -> None:
+    """An agent may manage only itself. Primary agents and operators may manage any."""
+    caller = _caller()
+    if not caller or caller == name:
+        return
+    if _role_of(caller) == "primary":
+        return
+    raise PermissionError(f"{caller} may only manage itself; ask the primary agent or the owner")
+
+
+def _redact(text: str) -> str:
+    try:
+        lib = str(WORKSPACE_ROOT / "lib")
+        if lib not in sys.path:
+            sys.path.insert(0, lib)
+        from redact import redact_text
+    except Exception:  # noqa: BLE001 - no redaction available: serve the raw text
+        return text
+    return redact_text(text)
+
+
+def tool_get_usage(_args: dict) -> dict:
+    return _http("GET", "/usage")
+
+
+def tool_get_cost(args: dict) -> dict:
+    name = args.get("agent")
+    if name is not None:
+        return _http("GET", f"/cost/{_agent_name(name)}")
+    return _http("GET", "/cost")
+
+
+def tool_tail_log(args: dict) -> dict:
+    service = args.get("service")
+    if not isinstance(service, str) or not SERVICE_RE.match(service) or ".." in service:
+        raise ValueError(f"invalid service name: {service!r}")
+    raw = args.get("lines")
+    try:
+        lines = int(TAIL_DEFAULT if raw is None else raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"lines must be an integer, got {raw!r}") from exc
+    lines = max(1, min(TAIL_MAX, lines))
+
+    logs = WORKSPACE_ROOT / "logs"
+    path = logs / f"{service}.log"
+    if not path.is_file():
+        available = sorted(p.stem for p in logs.glob("*.log")) if logs.is_dir() else []
+        return {"error": f"no log named {service}", "available": available}
+
+    with path.open(errors="replace") as fh:
+        tail = list(deque(fh, maxlen=lines))
+    text = _redact("".join(tail))
+    return {"service": service, "lines": len(tail), "text": text}
+
+
+def tool_set_effort(args: dict) -> dict:
+    name = _agent_name(args.get("name"))
+    level = args.get("level")
+    if level not in EFFORT_LEVELS:
+        raise ValueError(f"level must be one of {', '.join(EFFORT_LEVELS)}; got {level!r}")
+    _check_scope(name)
+    return _http("POST", f"/agents/{name}/effort", {"level": level})
+
+
+def tool_get_queue(args: dict) -> dict:
+    name = _agent_name(args.get("name"))
+    return _http("GET", f"/agents/{name}/queue")
+
+
+def tool_pause_agent(args: dict) -> dict:
+    name = _agent_name(args.get("name"))
+    _check_scope(name)
+    minutes = args.get("minutes")
+    if minutes is not None and (isinstance(minutes, bool) or not isinstance(minutes, int)
+                                or not (PAUSE_MIN <= minutes <= PAUSE_MAX)):
+        raise ValueError(f"minutes must be an integer {PAUSE_MIN}..{PAUSE_MAX}, got {minutes!r}")
+    return _http("POST", f"/agents/{name}/pause", {"minutes": minutes, "by": _caller() or "agent"})
+
+
+def tool_resume_agent(args: dict) -> dict:
+    name = _agent_name(args.get("name"))
+    _check_scope(name)
+    return _http("POST", f"/agents/{name}/resume", {})
+
+
+def tool_get_findings(_args: dict) -> dict:
+    path = WORKSPACE_ROOT / "data" / "health" / "summary.md"
+    if not path.is_file():
+        return {"summary": None, "note": "no findings file yet"}
+    return {"summary": path.read_text(errors="replace")}
 
 
 TOOLS = [
@@ -188,6 +321,86 @@ TOOLS = [
             "required": ["name"],
         },
     },
+    {
+        "name": "get_usage",
+        "description": "Rate-limit headroom for every agent (the usage governor). No args.",
+        "handler": tool_get_usage,
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "get_cost",
+        "description": "Cost summary. No args: every agent. With agent: that agent only.",
+        "handler": tool_get_cost,
+        "inputSchema": {
+            "type": "object",
+            "properties": {"agent": {"type": "string", "description": "Agent name (optional)"}},
+        },
+    },
+    {
+        "name": "tail_log",
+        "description": "Last lines of logs/<service>.log, secrets redacted. Default 40 lines, max 200. Missing service returns the available names.",
+        "handler": tool_tail_log,
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "service": {"type": "string", "description": "Log name without .log, e.g. relay or agent-server"},
+                "lines": {"type": "integer", "description": "Lines from the end (1-200, default 40)"},
+            },
+            "required": ["service"],
+        },
+    },
+    {
+        "name": "set_effort",
+        "description": "Set an agent's reasoning effort (low, medium, high, xhigh, max, or default). Self-scoped: an agent may set only its own.",
+        "handler": tool_set_effort,
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Agent name"},
+                "level": {"type": "string", "enum": list(EFFORT_LEVELS)},
+            },
+            "required": ["name", "level"],
+        },
+    },
+    {
+        "name": "get_queue",
+        "description": "What an agent still has to answer: queued messages and their state.",
+        "handler": tool_get_queue,
+        "inputSchema": {
+            "type": "object",
+            "properties": {"name": {"type": "string", "description": "Agent name"}},
+            "required": ["name"],
+        },
+    },
+    {
+        "name": "pause_agent",
+        "description": "Hold an agent's queue; the turn in progress finishes. Optional minutes (1-1440), else until resumed. Self-scoped.",
+        "handler": tool_pause_agent,
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Agent name"},
+                "minutes": {"type": "integer", "description": "Pause length, 1-1440; omit for open-ended"},
+            },
+            "required": ["name"],
+        },
+    },
+    {
+        "name": "resume_agent",
+        "description": "Release an operator or self pause and drain the queue. Self-scoped.",
+        "handler": tool_resume_agent,
+        "inputSchema": {
+            "type": "object",
+            "properties": {"name": {"type": "string", "description": "Agent name"}},
+            "required": ["name"],
+        },
+    },
+    {
+        "name": "get_findings",
+        "description": "Latest health findings summary (data/health/summary.md). No args.",
+        "handler": tool_get_findings,
+        "inputSchema": {"type": "object", "properties": {}},
+    },
 ]
 
 TOOL_BY_NAME = {t["name"]: t for t in TOOLS}
@@ -229,7 +442,7 @@ def handle_request(req: dict) -> dict | None:
         try:
             result = tool["handler"](args)
             return _ok(req_id, {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]})
-        except (RuntimeError, ValueError) as exc:
+        except (RuntimeError, ValueError, PermissionError) as exc:
             return _err(req_id, -32603, str(exc))
         except Exception as exc:  # noqa: BLE001
             return _err(req_id, -32603, f"unexpected error: {exc}")
@@ -252,7 +465,7 @@ def main() -> int:
         try:
             print(json.dumps(tool["handler"](args), indent=2))
             return 0
-        except (RuntimeError, ValueError) as exc:
+        except (RuntimeError, ValueError, PermissionError) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
 

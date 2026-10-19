@@ -250,6 +250,8 @@ class Registry:
                 entry["discord_bot_token_env"] = a.discord["token_env"]
             if a.discord.get("bot_id_env"):
                 entry["discord_bot_id_env"] = a.discord["bot_id_env"]
+            if a.discord.get("role_id_env"):
+                entry["discord_role_id_env"] = a.discord["role_id_env"]
             out[a.id] = entry
         return {"agents": out}
 
@@ -327,7 +329,7 @@ def parse_registry(data, channel_names=None):
             disc = {}
         else:
             for k, v in disc.items():
-                if k not in ("token_env", "bot_id_env"):
+                if k not in ("token_env", "bot_id_env", "role_id_env"):
                     warnings.append(f"agent '{aid}': unknown key 'discord.{k}'")
                 elif not isinstance(v, str):
                     errors.append(f"agent '{aid}': 'discord.{k}' must be a string")
@@ -555,6 +557,8 @@ def legacy_to_registry_dict(old, channels=None):
                 entry.setdefault("discord", {})["token_env"] = v
             elif k == "discord_bot_id_env":
                 entry.setdefault("discord", {})["bot_id_env"] = v
+            elif k == "discord_role_id_env":
+                entry.setdefault("discord", {})["role_id_env"] = v
             else:
                 entry[k] = v
         # 1.x prompts already carry their own core/house-style text: keep them

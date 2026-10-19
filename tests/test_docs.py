@@ -259,7 +259,7 @@ def _registry_module():
     return registry
 
 
-NESTED_OK = {"channels", "token_env", "bot_id_env", "id", "section", "core", "house_style",
+NESTED_OK = {"channels", "token_env", "bot_id_env", "role_id_env", "id", "section", "core", "house_style",
              "enabled", "after_s", "max_rows", "coalesce_ms", "max_lines_per_turn",
              "agents", "agents.yaml", "prompt", "shards", "channels.json", "name", "role"}
 

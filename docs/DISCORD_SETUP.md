@@ -108,6 +108,8 @@ If you want each agent to post under its own identity:
    DISCORD_BOT_ID_BUILDER=<id>
    ```
 5. In `config/agents.yaml`, set each agent's `discord.token_env` and `discord.bot_id_env`
+   (and `discord.role_id_env` if you want a Discord role to address the agent; see
+   `mention_only` below)
 
 Without multi-bot setup, all agents post through the primary bot.
 
@@ -161,6 +163,36 @@ fraction of a cent, recorded under the channel's agent in the cost table;
 counters are in `data/health/relay.json` under `reply_gate`. Set
 `KARAKOS_REPLY_CLASSIFIER=off` in `config/.env` to disable the tier install-wide
 without editing channels.
+
+**`mention_only`** — for channels where an agent should speak only when it is
+addressed on purpose. Set `"mention_only": true` on the channel and the agent
+answers only a direct @mention of its bot, or a mention of a Discord role mapped
+to it. A plain message, a reply to the agent, and a message that opens with its
+name all stay silent. Channel ownership and the primary fallback do not apply
+either: a shard that owns the channel still does not answer an unmentioned
+message. A channel that sets both `mention_only` and `reply_gate` logs an error
+at load and is treated as `mention_only`.
+
+Role mentions need one extra key per agent, naming the environment variable that
+holds the role's id (right-click the role in Discord with developer mode on, then
+Copy Role ID). In `config/agents.yaml`:
+
+```yaml
+agents:
+  main:
+    discord:
+      token_env: DISCORD_BOT_TOKEN_MAIN
+      bot_id_env: DISCORD_BOT_ID_MAIN
+      role_id_env: DISCORD_ROLE_ID_MAIN
+```
+
+and in `config/.env`, `DISCORD_ROLE_ID_MAIN=<role id>`. A mention of a mapped
+role routes to that agent the same way a mention of its bot does. A role mention
+with no mapped agent is ignored.
+
+```json
+"front-desk": { "id": "...", "default_agent": "main", "mention_only": true }
+```
 
 **`guest_agents`** — lets bots from *outside* this install address your agents
 in that channel. Off by default, so a stranger's bot in a shared server is
