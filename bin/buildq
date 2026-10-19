@@ -6,17 +6,26 @@
                  [--priority N] [--host H] [--requester AGENT]
   buildq list [--status S] [--json]      buildq show ID      buildq cancel ID
   buildq requeue ID    buildq hosts    buildq ingest
+  buildq doctor [--json]               buildq enable [--no-agents]
 
 Opens data/build-queue.db directly (WAL), so it works whether or not the
 dispatcher is running. Refuses while config/build-queue.yaml says
 `enabled: false` unless --force (briefs dropped in the inbox keep working in that
-state through the relay's own adapter).
+state through the relay's own adapter). `doctor` (read-only) lists what a build
+needs; `enable` switches the queue on and creates the builder and reviewer
+agents unless --no-agents. Both run while the queue is disabled.
 """
 import argparse
 import json
 import os
+import re
+import shutil
+import sqlite3
+import subprocess
 import sys
 from pathlib import Path
+
+import yaml
 
 PKG = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PKG / "lib"))
@@ -24,10 +33,196 @@ sys.path.insert(0, str(PKG / "lib"))
 import build_hosts  # noqa: E402
 import buildq  # noqa: E402
 
+CREATE_AGENT = Path(__file__).resolve().parent / "create-agent.sh"
+BUILD_QUEUE_YAML = """\
+# Build queue. `bin/buildq doctor` checks what it needs.
+enabled: true
+default_host: local
+hosts:
+  local:
+    kind: local
+    concurrency: 1
+retry:
+  max_attempts: 1
+"""
+AGENT_ROLES = (  # (role, template, model, agent name) used by `enable`
+    ("builder", "builder", "haiku", "builder"),
+    ("reviewer", "reviewer", "sonnet", "reviewer"),
+)
+
 
 def die(msg, code=1):
     print(f"buildq: {msg}", file=sys.stderr)
     return code
+
+
+# --- doctor / enable (work while the queue is disabled) --------------------
+
+def _check(name, ok, detail):
+    return {"name": name, "ok": bool(ok), "detail": detail}
+
+
+def _agent_ids(ws, role):
+    """Agent ids in config/agents.yaml with `role: <role>`. Raises OSError or
+    yaml.YAMLError when the file is unreadable."""
+    path = ws / "config" / "agents.yaml"
+    if not path.is_file():
+        return []
+    data = yaml.safe_load(path.read_text()) or {}
+    agents = data.get("agents") if isinstance(data, dict) else None
+    if not isinstance(agents, dict):
+        return []
+    return [str(aid) for aid, body in agents.items()
+            if isinstance(body, dict) and body.get("role") == role]
+
+
+def _role_check(ws, role, name):
+    try:
+        ids = _agent_ids(ws, role)
+    except (OSError, yaml.YAMLError) as e:
+        return _check(name, False, f"config/agents.yaml unreadable: {e}")
+    if ids:
+        return _check(name, True, ", ".join(ids))
+    return _check(name, False, "none: run `buildq enable`")
+
+
+def _config_check(ws):
+    path = ws / "config" / "build-queue.yaml"
+    cfg = build_hosts.load_config(path)
+    if cfg.invalid:
+        return _check("config", False, f"invalid: {cfg.invalid}"), cfg
+    note = "" if path.is_file() else " (no build-queue.yaml; built-in defaults)"
+    return _check("config", True, f"enabled: {'true' if cfg.enabled else 'false'}{note}"), cfg
+
+
+def _database_check(ws):
+    db = ws / "data" / "build-queue.db"
+    if not db.is_file():
+        return _check("database", False, "data/build-queue.db missing: run karakos migrate")
+    try:
+        # Read-only: a plain connect would create the file or switch it to WAL.
+        conn = sqlite3.connect(db.as_uri() + "?mode=ro", uri=True)
+        try:
+            present = buildq.tables_present(conn)
+        finally:
+            conn.close()
+    except sqlite3.Error as e:
+        return _check("database", False, f"cannot open: {e}")
+    return _check("database", present, "build queue tables present" if present
+                  else "build queue tables missing: run karakos migrate")
+
+
+def _tool_on_host(hc, tool):
+    """-> (found, detail). The binary for `claude_cli` is `claude`."""
+    if hc.kind == "ssh":
+        if not hc.target:
+            return False, "ssh host has no target"
+        try:
+            p = subprocess.run(build_hosts.ssh_argv(hc.target, f"command -v {tool}"),
+                               capture_output=True, text=True, timeout=10,
+                               stdin=subprocess.DEVNULL)
+        except (subprocess.TimeoutExpired, OSError) as e:
+            return False, f"ssh {hc.target}: {type(e).__name__}"
+        if p.returncode == 0 and p.stdout.strip():
+            return True, p.stdout.strip()
+        return False, f"{tool} not found on {hc.target}"
+    path = shutil.which(tool)
+    return (True, path) if path else (False, f"{tool} not found")
+
+
+def _host_checks(cfg):
+    out = []
+    for name, hc in sorted(cfg.hosts.items()):
+        for label, tool in (("claude_cli", "claude"), ("git", "git"), ("gh", "gh")):
+            ok, detail = _tool_on_host(hc, tool)
+            out.append(_check(f"{label}@{name}", ok, detail))
+    return out
+
+
+def _github_auth_check(cfg):
+    for var in ("GH_TOKEN", "GITHUB_TOKEN"):
+        if os.environ.get(var):
+            return _check("github_auth", True, f"{var} set")
+    if "local" not in cfg.hosts:
+        return _check("github_auth", False, "no GH_TOKEN/GITHUB_TOKEN; no local host to run gh auth status")
+    if not shutil.which("gh"):
+        return _check("github_auth", False, "no GH_TOKEN/GITHUB_TOKEN; gh not found, gh auth status not run")
+    try:
+        p = subprocess.run(["gh", "auth", "status"], capture_output=True, text=True,
+                           timeout=10, stdin=subprocess.DEVNULL)
+    except (subprocess.TimeoutExpired, OSError) as e:
+        return _check("github_auth", False, f"gh auth status: {type(e).__name__}")
+    if p.returncode == 0:
+        return _check("github_auth", True, "gh auth status ok")
+    return _check("github_auth", False,
+                  "no GH_TOKEN/GITHUB_TOKEN and gh auth status failed: set GH_TOKEN in config/.env or run gh auth login")
+
+
+def doctor_checks(ws):
+    config, cfg = _config_check(ws)
+    checks = [config, _database_check(ws),
+              _role_check(ws, "builder", "builder_agent"),
+              _role_check(ws, "reviewer", "reviewer_agent")]
+    checks += _host_checks(cfg)
+    checks.append(_github_auth_check(cfg))
+    return checks
+
+
+def _print_checks(checks):
+    for c in checks:
+        print(f"{'PASS' if c['ok'] else 'FAIL'} {c['name']}  {c['detail']}")
+    failing = sum(1 for c in checks if not c["ok"])
+    print(f"doctor: {failing} failing")
+    return 0 if not failing else 1
+
+
+def cmd_doctor(ws, as_json):
+    checks = doctor_checks(ws)
+    if as_json:
+        print(json.dumps(checks))
+        return 0 if all(c["ok"] for c in checks) else 1
+    return _print_checks(checks)
+
+
+def _enable_config(path):
+    if not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(BUILD_QUEUE_YAML)
+        return "wrote"
+    text = path.read_text()
+    if re.search(r"(?m)^enabled:", text):
+        # Replace only the value; the rest of the line (a trailing comment) and
+        # every other line stay as they are.
+        new = re.sub(r"(?m)^enabled:(?:[^\S\n]+[^\s#]+)?", "enabled: true", text, count=1)
+    else:
+        new = "enabled: true\n" + text
+    path.write_text(new)
+    return "updated"
+
+
+def cmd_enable(ws, no_agents):
+    path = ws / "config" / "build-queue.yaml"
+    print(f"{_enable_config(path)} {path}")
+    if not no_agents:
+        for role, template, model, name in AGENT_ROLES:
+            try:
+                present = _agent_ids(ws, role)
+            except (OSError, yaml.YAMLError) as e:
+                print(f"skip {name}: config/agents.yaml unreadable: {e}")
+                continue
+            if present:
+                print(f"{role} agent present: {', '.join(present)}")
+                continue
+            sys.stdout.flush()  # keep our lines in order with create-agent.sh's output
+            r = subprocess.run(["bash", str(CREATE_AGENT), "--template", template,
+                                "--model", model, name],
+                               env={**os.environ, "WORKSPACE_ROOT": str(ws)})
+            if r.returncode:
+                print(f"create {name} failed (exit {r.returncode}); the doctor will report it")
+    print()
+    rc = cmd_doctor(ws, as_json=False)
+    print("Restart to apply: docker compose restart (or bin/karakos restart)")
+    return rc
 
 
 def _row(r):
@@ -83,8 +278,16 @@ def main(argv=None):
         sub.add_parser(n, parents=[common]).add_argument("id")
     sub.add_parser("hosts", parents=[common])
     sub.add_parser("ingest", parents=[common])
+    sub.add_parser("doctor", parents=[common])
+    en = sub.add_parser("enable")
+    en.add_argument("--no-agents", action="store_true", help="only switch the queue on")
     args = ap.parse_args(argv)
     ws = Path(args.workspace)
+    # Both work while the queue is disabled and whatever the config says.
+    if args.cmd == "doctor":
+        return cmd_doctor(ws, args.as_json)
+    if args.cmd == "enable":
+        return cmd_enable(ws, args.no_agents)
     cfg = build_hosts.load_config(ws / "config" / "build-queue.yaml")
     if cfg.invalid:
         return die(f"invalid config: {cfg.invalid}")
