@@ -72,6 +72,8 @@ BUILTIN = [
     Job("monitor-tick", "job", Every(60), "monitor_tick:run", 300),
     Job("friction-sensor", "job", Every(3600, 600),
         "monitor_jobs.friction_sensor:run_scheduled", 3 * H),
+    Job("friction-review", "job", Daily("03:30"),
+        "monitor_jobs.friction_review:run_scheduled", 48 * H),
     Job("scheduler", "component", None, None, 300, critical=True),
     Job("mcp-tools", "component", None, None, 600, critical=True),
     Job("relay", "component", None, None, 300, critical=True),
