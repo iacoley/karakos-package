@@ -14,6 +14,12 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Friction sensor (no LLM): `lib/friction.py`, `bin/friction-sensor.py` and an hourly `friction-sensor` job scan the agent stream logs for tool errors, non-zero Bash exits, denials, rate-limit pressure and repeated commands, append to `data/friction-log.jsonl` and refresh `data/friction/weekly.md`. Read-only: nothing edits a prompt or persona. (Refs #237, build A; the nightly review and `friction` MCP action are build B)
+
+## [2.1.0] - 2026-10-19
+
 ### Changed
 
 - Agents see where each message was posted: the batch line carries the channel name, channel id and server (Discord guild name, or `dm`), printed once per run of same-channel rows. A thread reads as `parent/thread`. Channels missing from `channels.json` show their Discord name instead of `unknown`. Queue rows for Discord messages now store the guild name in `server` rather than `discord`; `server` is also what the edit-reroute lookup matches on, so the relay's edit and reaction paths send the same value.
@@ -23,7 +29,7 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Private overlay repo for per-install data: `overlay/` is its own git repo holding config, personas and skills (named seams), applied over the package so installs never fork it; `bin/overlay.py` runs `init`, `status`, `apply`, `capture`, `pull`, `push` and `check-secrets`. (Refs #243, "MÍRDAIN G12: a private overlay repo for per-install data, so installs never fork the package")
 - Memory hygiene: `memory` gains `forget` and `supersede`, `graph` gains `delete_entity`, `delete_edge` and `merge_entities`, `taskboard` gains `delete`. All are soft deletes with a `memory_audit` row (tombstone for tasks); hard delete stays operator-only. (Refs #238, build A; the dedup script is build B and not included)
 - Per-channel `ux.tool_streaming` in `channels.json`: a channel can turn the tool-activity lines on or off, overriding the agent's `tool_streaming`; unset inherits the agent setting. (Refs #228, "v2.0.0 fresh-install defects from Babybel live-fire check")
-- Friction sensor (no LLM): `lib/friction.py`, `bin/friction-sensor.py` and an hourly `friction-sensor` job scan the agent stream logs for tool errors, non-zero Bash exits, denials, rate-limit pressure and repeated commands, append to `data/friction-log.jsonl` and refresh `data/friction/weekly.md`. Read-only: nothing edits a prompt or persona. (Refs #237, build A; the nightly review and `friction` MCP action are build B)
+- `bin/self-diagnose.py`: read-only whole-install diagnosis (agent server health, outbox, monitor findings, job heartbeats, pre-commit hook, disk, schema stamp, log errors), ranked output, `--json`, exit 0/1. (Refs #236, part 1; the admin MCP tool, `--self-test` canary, build-queue and version-drift sections are follow-ups)
 
 ### Fixed
 
@@ -51,7 +57,6 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- Friction sensor (no LLM): `lib/friction.py`, `bin/friction-sensor.py` and an hourly `friction-sensor` job scan the agent stream logs for tool errors, non-zero Bash exits, denials, rate-limit pressure and repeated commands, append to `data/friction-log.jsonl` and refresh `data/friction/weekly.md`. Read-only: nothing edits a prompt or persona. (Refs #237, build A; the nightly review and `friction` MCP action are build B)
 - `./setup.sh --answers <file.json>` (also `install.sh --answers` and `KARAKOS_ANSWERS`) runs the wizard without prompts, with secrets readable from environment variables; example in `docs/answers.example.json`.
 - `AGENTS.md` and `docs/AGENT_GUIDE.md`, an entry point and operating guide for coding agents (install, self-repair, self-improve, contribute upstream). `CLAUDE.md` imports `AGENTS.md`.
 
@@ -233,7 +238,8 @@ Initial release: an installable multi-agent household system — Discord
 integration, local dashboard, episodic memory, session persistence, cost
 tracking, and builder/reviewer agents behind guardrails.
 
-[Unreleased]: https://github.com/mcarmody/karakos-package/compare/v2.0.2...HEAD
+[Unreleased]: https://github.com/mcarmody/karakos-package/compare/v2.1.0...develop
+[2.1.0]: https://github.com/mcarmody/karakos-package/compare/v2.0.2...v2.1.0
 [2.0.2]: https://github.com/mcarmody/karakos-package/compare/v2.0.1...v2.0.2
 [2.0.1]: https://github.com/mcarmody/karakos-package/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/mcarmody/karakos-package/compare/v1.5.0...v2.0.0
