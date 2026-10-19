@@ -23,6 +23,7 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Private overlay repo for per-install data: `overlay/` is its own git repo holding config, personas and skills (named seams), applied over the package so installs never fork it; `bin/overlay.py` runs `init`, `status`, `apply`, `capture`, `pull`, `push` and `check-secrets`. (Refs #243, "MÍRDAIN G12: a private overlay repo for per-install data, so installs never fork the package")
 - Memory hygiene: `memory` gains `forget` and `supersede`, `graph` gains `delete_entity`, `delete_edge` and `merge_entities`, `taskboard` gains `delete`. All are soft deletes with a `memory_audit` row (tombstone for tasks); hard delete stays operator-only. (Refs #238, build A; the dedup script is build B and not included)
 - Per-channel `ux.tool_streaming` in `channels.json`: a channel can turn the tool-activity lines on or off, overriding the agent's `tool_streaming`; unset inherits the agent setting. (Refs #228, "v2.0.0 fresh-install defects from Babybel live-fire check")
+- Friction sensor (no LLM): `lib/friction.py`, `bin/friction-sensor.py` and an hourly `friction-sensor` job scan the agent stream logs for tool errors, non-zero Bash exits, denials, rate-limit pressure and repeated commands, append to `data/friction-log.jsonl` and refresh `data/friction/weekly.md`. Read-only: nothing edits a prompt or persona. (Refs #237, build A; the nightly review and `friction` MCP action are build B)
 
 ### Fixed
 
