@@ -72,6 +72,13 @@ mkdir -p \
     "$WORKSPACE_ROOT/logs/session-summaries" \
     "$WORKSPACE_ROOT/inbox"
 
+# Fresh install: create the memory graph once. Only when this boot stamped the
+# data dir (STAMP_VERIFIED) and graph.db is absent, so a migrated 1.x install
+# (which already has graph.db, or is stamped by the migrator) is never touched.
+if [ "$STAMP_VERIFIED" = "1" ] && [ ! -e "$WORKSPACE_ROOT/data/memory/graph.db" ]; then
+    (cd "$PKG_ROOT" && python3 -m lib.graph init "$WORKSPACE_ROOT/data") || true
+fi
+
 # Create inbox dirs for each configured agent (config/agents.yaml via the
 # registry). Boot never converts 1.x config: `karakos migrate` does, and the
 # stamp check above refuses an unmigrated directory. A missing or invalid

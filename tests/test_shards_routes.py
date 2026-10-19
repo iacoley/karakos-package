@@ -5,7 +5,9 @@ import json
 import logging
 import sqlite3
 import sys
+from unittest import mock
 
+import pytest
 import yaml
 
 from conftest import PACKAGE_ROOT
@@ -268,9 +270,8 @@ def test_graceful_shutdown_starts_no_summarizer(harness):
 
             h.module.asyncio.create_subprocess_exec = spy
             try:
+                # Returns normally: no sys.exit inside graceful_shutdown.
                 await h.module.graceful_shutdown("TEST")
-            except SystemExit:
-                pass
             finally:
                 h.module.asyncio.create_subprocess_exec = real
             assert not h.module.agent_processes
@@ -278,6 +279,38 @@ def test_graceful_shutdown_starts_no_summarizer(harness):
 
     run(scenario())
     assert not marker.exists()
+
+
+def test_shutdown_and_exit_orders_shutdown_flush_then_exit_zero(harness):
+    """Signal handlers run _shutdown_and_exit: graceful shutdown, then flush
+    logging, then os._exit(0). Nothing is raised inside a task, so asyncio
+    logs no "Task exception was never retrieved"."""
+    h = fixture(harness)
+    calls = []
+
+    class _Exited(Exception):
+        pass
+
+    async def fake_shutdown(sig):
+        calls.append(("shutdown", sig))
+
+    def fake_flush():
+        calls.append(("flush",))
+
+    def fake_exit(code):
+        calls.append(("exit", code))
+        raise _Exited()
+
+    async def scenario():
+        async with h:
+            with mock.patch.object(h.module, "graceful_shutdown", fake_shutdown), \
+                    mock.patch.object(h.module.logging, "shutdown", fake_flush), \
+                    mock.patch.object(h.module.os, "_exit", fake_exit):
+                with pytest.raises(_Exited):
+                    await h.module._shutdown_and_exit("SIGTERM")
+
+    run(scenario())
+    assert calls == [("shutdown", "SIGTERM"), ("flush",), ("exit", 0)]
 
 
 # -- schema -------------------------------------------------------------------------

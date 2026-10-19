@@ -803,6 +803,33 @@ def hive_call(args: dict, monotonic=time.monotonic) -> dict:
             return {"status": "timeout", "error": "Timed out waiting for an answer."}
 
 
+def _installed_version() -> str:
+    """The release this workspace was built from: the VERSION file at the root,
+    else `git describe` in the workspace, else "unknown"."""
+    try:
+        version = (WORKSPACE / "VERSION").read_text().strip()
+        if version:
+            return version
+    except OSError:
+        pass
+    try:
+        out = subprocess.run(["git", "describe", "--tags", "--always"], cwd=str(WORKSPACE),
+                             capture_output=True, text=True, timeout=5)
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return "unknown"
+
+
+def _schema_version():
+    """The `schema` field of data/.schema-version, or None if absent or unreadable."""
+    try:
+        return json.loads((WORKSPACE / "data" / ".schema-version").read_text()).get("schema")
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
 def handle_core_tool(tool_name: str, args: dict) -> dict:
     """Handle built-in core tools."""
 
@@ -822,9 +849,12 @@ def handle_core_tool(tool_name: str, args: dict) -> dict:
             config = {}
             if config_path.exists():
                 config = json.loads(config_path.read_text())
+            installed = _installed_version()
             return {
                 "system_name": config.get("system_name", os.environ.get("SYSTEM_NAME", "Karakos")),
-                "version": config.get("version", "1.0.0"),
+                "version": installed,
+                "installed_version": installed,
+                "schema_version": _schema_version(),
                 "owner": config.get("owner_name", os.environ.get("OWNER_NAME", "User")),
                 "workspace": str(WORKSPACE),
             }

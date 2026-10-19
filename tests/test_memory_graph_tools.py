@@ -275,6 +275,13 @@ def server(tmp_path, monkeypatch):
     return import_script("tools-server", file_path=PACKAGE_ROOT / "mcp" / "tools-server.py")
 
 
+def test_not_initialised_message_names_both_fixes():
+    """A fresh install needs `lib.graph init`; a 1.x upgrade needs `karakos migrate`.
+    The message must name both so an operator can tell which one applies."""
+    assert "python3 -m lib.graph init" in gt.NOT_INITIALISED
+    assert "karakos migrate" in gt.NOT_INITIALISED
+
+
 def test_uninitialised_graph_returns_migrate_message(server, tmp_path):
     for tool, args in (("memory", {"action": "recall", "query": "x"}),
                        ("memory", {"action": "write", "content": "x"}),

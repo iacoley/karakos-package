@@ -131,3 +131,26 @@ def test_health_loop_exists_and_write_health_writes_timestamp(tools_server, monk
     monkeypatch.setattr(tools_server, "HEALTH_FILE", health)
     tools_server.write_health()
     assert "timestamp" in _json.loads(health.read_text())
+
+
+def test_workspace_status_reports_installed_version_from_version_file(tools_server, tmp_path):
+    """`workspace status` reads the release from the VERSION file at the workspace
+    root, not from .karakos/config.json (which setup never rewrites on upgrade)."""
+    (tmp_path / "VERSION").write_text("2.0.2\n")
+    (tmp_path / ".karakos").mkdir()
+    (tmp_path / ".karakos" / "config.json").write_text(json.dumps({"version": "1.0.0"}))
+
+    result = tools_server.handle_core_tool("workspace", {"action": "status"})
+
+    assert result["installed_version"] == "2.0.2"
+    assert result["version"] == result["installed_version"]
+    assert result["schema_version"] is None
+
+
+def test_workspace_status_reads_schema_version_stamp(tools_server, tmp_path):
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / ".schema-version").write_text(json.dumps({"schema": 5}))
+
+    result = tools_server.handle_core_tool("workspace", {"action": "status"})
+
+    assert result["schema_version"] == 5

@@ -1555,7 +1555,7 @@ async def record_rate_limit_event(agent: str, info, now=None) -> None:
             " WHERE rate_limit_type = ?", (resets_at, u.type))
 
         consumed = ("in the warning band" if progress is None
-                    else f"{progress * 100:.0f}% through the window")
+                    else f"{progress * 100:.0f}% of the window's time elapsed")
         log.warning(f"{agent} rate-limit headroom low: type={u.type}, "
                     f"status={u.status}, {consumed}")
 
@@ -4830,7 +4830,14 @@ async def graceful_shutdown(sig):
         await http_session.close()
 
     log.info("Shutdown complete")
-    sys.exit(0)
+
+
+async def _shutdown_and_exit(sig):
+    """Signal-handler task. Exits via os._exit, not sys.exit: a SystemExit raised
+    inside a task is never retrieved, so asyncio logged it as an unhandled task error."""
+    await graceful_shutdown(sig)
+    logging.shutdown()
+    os._exit(0)
 
 # =============================================================================
 # Server Startup
@@ -4922,8 +4929,8 @@ async def startup(app):
 
     # Register signal handlers in event loop context
     loop = asyncio.get_running_loop()
-    loop.add_signal_handler(signal.SIGTERM, lambda: asyncio.create_task(graceful_shutdown("SIGTERM")))
-    loop.add_signal_handler(signal.SIGINT, lambda: asyncio.create_task(graceful_shutdown("SIGINT")))
+    loop.add_signal_handler(signal.SIGTERM, lambda: asyncio.create_task(_shutdown_and_exit("SIGTERM")))
+    loop.add_signal_handler(signal.SIGINT, lambda: asyncio.create_task(_shutdown_and_exit("SIGINT")))
 
     log.info(f"Agent server ready on port {PORT}")
 

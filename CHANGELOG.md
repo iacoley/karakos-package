@@ -18,6 +18,14 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Memory hygiene: `memory` gains `forget` and `supersede`, `graph` gains `delete_entity`, `delete_edge` and `merge_entities`, `taskboard` gains `delete`. All are soft deletes with a `memory_audit` row (tombstone for tasks); hard delete stays operator-only. (Refs #238, build A; the dedup script is build B and not included)
 
+### Fixed
+
+- Fresh install initialises the memory graph at first boot (`data/memory/graph.db`), so `memory` and `graph` tools no longer report uninitialised; the not-initialised message names both `python3 -m lib.graph init` (fresh install) and `karakos migrate` (1.x upgrade). Fixes #227 ("Fresh install leaves memory graph uninitialised"). (Refs #228, "v2.0.0 fresh-install defects from Babybel live-fire check")
+- Rate-limit warning says "of the window's time elapsed" instead of "through the window", so elapsed time is no longer read as usage. (Refs #228, "v2.0.0 fresh-install defects from Babybel live-fire check")
+- Agent server exits 0 on SIGTERM/SIGINT without a "Task exception was never retrieved" traceback: the shutdown handler no longer raises `SystemExit` inside a task. (Refs #228, "v2.0.0 fresh-install defects from Babybel live-fire check")
+- `preflight.sh` passes the Docker engine, Compose v2 and WSL integration checks inside the container (`/.dockerenv` or `KARAKOS_IN_CONTAINER=1`) instead of failing on host-only tooling. (Refs #228, "v2.0.0 fresh-install defects from Babybel live-fire check")
+- `workspace status` reports the real release: `installed_version` (and `version`) comes from the root `VERSION` file, and `schema_version` from `data/.schema-version`; `VERSION` is in the image and the release process sets it. (Refs #228, "v2.0.0 fresh-install defects from Babybel live-fire check")
+
 ## [2.0.2] - 2026-10-19
 
 ### Fixed

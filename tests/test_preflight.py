@@ -156,6 +156,7 @@ def run(tmp_path: Path, mock_bin: Path | None = None,
 
     env = os.environ.copy()
     env.pop("WSL_DISTRO_NAME", None)  # Never run WSL check unless test explicitly sets it
+    env.pop("KARAKOS_IN_CONTAINER", None)  # Host run unless a test explicitly sets it
     env["PREFLIGHT_REPO_ROOT"] = str(repo_root)
 
     if mock_bin is not None:
@@ -774,3 +775,17 @@ class TestVerifyGates:
         result = run(tmp_path, mock)
         assert result.returncode == 0
         assert "verify-gates" not in result.stdout
+
+
+class TestInContainer:
+    def test_host_only_checks_pass_inside_container(self, tmp_path):
+        """Inside the karakos container there is no Docker engine, compose plugin
+        or WSL integration. Even with docker broken and WSL set, the three host-only
+        checks report pass and do not run."""
+        mock = make_full_mock_bin(tmp_path)
+        write_mock(mock, "docker", "#!/bin/bash\nexit 127\n")
+        result = run(tmp_path, mock,
+                     extra_env={"KARAKOS_IN_CONTAINER": "1", "WSL_DISTRO_NAME": "Ubuntu"})
+        for name in ("docker_engine_reachable", "docker_compose_v2", "wsl_integration_healthy"):
+            assert f"✓ {name}" in result.stdout
+            assert f"✗ {name}" not in result.stdout

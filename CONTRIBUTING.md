@@ -90,8 +90,8 @@ Maintainers only. Releases go from `develop` to `main` and nowhere else.
 
 1. **Prepare on `develop`.** Move the `## [Unreleased]` entries in `CHANGELOG.md`
    under a new `## [X.Y.Z] - YYYY-MM-DD` heading (three-part version; see the
-   note at the top of the changelog), update the compare links at the bottom, and
-   merge that through a normal PR. Run the real-CLI smoke by hand if a credential
+   note at the top of the changelog), set `VERSION` to the release number, update
+   the compare links at the bottom, and merge that through a normal PR. Run the real-CLI smoke by hand if a credential
    is available: `python3 -m pytest tests -q -m "slow and realcli"`.
 2. **Open the release PR** from `develop` to `main`:
    `gh pr create --base main --head develop --title "Release vX.Y.Z"` with the changelog entry

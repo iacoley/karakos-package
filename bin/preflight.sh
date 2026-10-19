@@ -105,11 +105,21 @@ _fail() {
     fi
 }
 
+# Inside the karakos container there is no Docker engine, compose plugin or WSL
+# integration to inspect; the host-only checks pass there by definition.
+_in_container() {
+    [ -e /.dockerenv ] || [ "${KARAKOS_IN_CONTAINER:-}" = "1" ]
+}
+
 # =============================================================================
 # Check 1: docker_engine_reachable
 # Use timeout 10 so a hung Docker socket doesn't make preflight itself hang.
 # =============================================================================
 _check_docker_engine_reachable() {
+    if _in_container; then
+        _pass "docker_engine_reachable"
+        return
+    fi
     timeout 10 docker info >/dev/null 2>&1
     local rc=$?
     if [ "$rc" -eq 0 ]; then
@@ -129,6 +139,10 @@ _check_docker_engine_reachable() {
 # Check 2: docker_compose_v2
 # =============================================================================
 _check_docker_compose_v2() {
+    if _in_container; then
+        _pass "docker_compose_v2"
+        return
+    fi
     local version_output
     version_output="$(docker compose version 2>/dev/null)" || {
         _fail "docker_compose_v2" \
@@ -156,6 +170,10 @@ _check_docker_compose_v2() {
 # Use timeout 10 here too — same rationale as check 1.
 # =============================================================================
 _check_wsl_integration_healthy() {
+    if _in_container; then
+        _pass "wsl_integration_healthy"
+        return
+    fi
     [ -n "${WSL_DISTRO_NAME:-}" ] || return 0
 
     local docker_out rc
@@ -467,7 +485,8 @@ _verify_gate() {
     local name="$1" snippet="$2"
     shift 2
     local out
-    out="$(env PREFLIGHT_SOURCE_ONLY=true "$@" bash -c "source '$PREFLIGHT_SELF'; $snippet" 2>&1)"
+    # The negative controls must fail even when this runs inside a container.
+    out="$(env PREFLIGHT_SOURCE_ONLY=true "$@" bash -c "source '$PREFLIGHT_SELF'; _in_container() { false; }; $snippet" 2>&1)"
     if printf '%s\n' "$out" | grep -qF "✗ ${name}:"; then
         printf '  ok      %s — fails under its negative control\n' "$name"
         return 0

@@ -11,7 +11,8 @@ import sys
 from lib.graph import embed as _embed
 from lib.graph.schema import GraphNotInitialised
 
-NOT_INITIALISED = "memory graph is not initialised; run: karakos migrate"
+NOT_INITIALISED = ("memory graph is not initialised; fresh install: run python3 -m lib.graph init; "
+                  "upgrading 1.x data: run karakos migrate")
 
 CONTENT_MAX = 4000
 WRITE_EMBED_BUDGET_S = 10.0
