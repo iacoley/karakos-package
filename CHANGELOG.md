@@ -16,8 +16,8 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Friction sensor (no LLM): `lib/friction.py`, `bin/friction-sensor.py` and an hourly `friction-sensor` job scan the agent stream logs for tool errors, non-zero Bash exits, denials, rate-limit pressure and repeated commands, append to `data/friction-log.jsonl` and refresh `data/friction/weekly.md`. Read-only: nothing edits a prompt or persona. (Refs #237, build A; the nightly review and `friction` MCP action are build B)
 - `bin/self-test.py`: runs `bin/self-diagnose.py`, then starts both MCP servers over stdio and calls one read-only tool on each; PASS/FAIL per step, `--json`, exit 0/1. (Refs #236, part 2; builds on the `bin/self-diagnose.py` PR)
-- `bin/self-diagnose.py`: read-only whole-install diagnosis (agent server health, outbox, monitor findings, job heartbeats, pre-commit hook, disk, schema stamp, log errors), ranked output, `--json`, exit 0/1. (Refs #236, part 1; the admin MCP tool, `--self-test` canary, build-queue and version-drift sections are follow-ups)
 
 ## [2.1.0] - 2026-10-19
 
