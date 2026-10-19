@@ -26,6 +26,12 @@ def _copy(src, dst) -> None:
     except PermissionError:
         pass
 
+def _overlay_git(label, root, p) -> bool:
+    """The overlay's own .git is not backed up: its objects are read-only, so a restore onto
+    the live overlay would fail, and its history lives on the overlay's remote."""
+    return label == "overlay" and ".git" in p.relative_to(root).parts
+
+
 def _sha256(p: Path) -> str:
     h = hashlib.sha256()
     with open(p, "rb") as f:
@@ -50,7 +56,8 @@ def _sqlite_copy(src: Path, dst: Path) -> None:
 def _sources(data_dir: Path, config_dir: Path):
     """(label, path) roots to capture. Labels are the top-level names in the backup."""
     roots = [("data", data_dir), ("config", config_dir),
-             ("agents", config_dir.parent / "agents")]
+             ("agents", config_dir.parent / "agents"),
+             ("overlay", config_dir.parent / "overlay")]
     out = [(l, p) for l, p in roots if p.is_dir()]
     env = config_dir / ".env"
     if not env.is_file():
@@ -81,7 +88,8 @@ def backup(data_dir, config_dir, dest) -> Path:
             for p in sorted(root.rglob("*")):
                 if p.is_file() and not p.name.endswith(_SKIP_SUFFIXES) \
                         and p.name != ".schema-version.tmp" \
-                        and dest not in p.parents and out not in p.parents:
+                        and dest not in p.parents and out not in p.parents \
+                        and not _overlay_git(label, root, p):
                     files.append((f"{label}/{p.relative_to(root).as_posix()}", p))
         if env:
             files.append((".env", env))
@@ -89,7 +97,8 @@ def backup(data_dir, config_dir, dest) -> Path:
         for label, root in roots:
             for p in sorted(root.rglob("*")):
                 if p.is_dir() and dest not in p.parents and p != dest \
-                        and out not in p.parents and p != out:
+                        and out not in p.parents and p != out \
+                        and not _overlay_git(label, root, p):
                     dirs.append(f"{label}/{p.relative_to(root).as_posix()}")
         entries = []
         for rel, src in files:

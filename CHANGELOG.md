@@ -16,6 +16,7 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Private overlay repo for per-install data: `overlay/` is its own git repo holding config, personas and skills (named seams), applied over the package so installs never fork it; `bin/overlay.py` runs `init`, `status`, `apply`, `capture`, `pull`, `push` and `check-secrets`. (Refs #243, "MÍRDAIN G12: a private overlay repo for per-install data, so installs never fork the package")
 - Memory hygiene: `memory` gains `forget` and `supersede`, `graph` gains `delete_entity`, `delete_edge` and `merge_entities`, `taskboard` gains `delete`. All are soft deletes with a `memory_audit` row (tombstone for tasks); hard delete stays operator-only. (Refs #238, build A; the dedup script is build B and not included)
 
 ### Fixed

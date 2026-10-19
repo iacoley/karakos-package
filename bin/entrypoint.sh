@@ -110,6 +110,10 @@ fi
 # must never mutate 1.x data (the migrator runs hooks-sync for a 1.x install).
 if [ "$STAMP_VERIFIED" = "1" ]; then
     python3 "$WORKSPACE_ROOT/bin/hooks-sync.py" "$WORKSPACE_ROOT" || true
+    # Re-assert the private overlay (overlay/, see docs/OVERLAY.md) after a package upgrade.
+    if [ -d "$WORKSPACE_ROOT/overlay/.git" ]; then
+        python3 "$WORKSPACE_ROOT/bin/overlay.py" apply --quiet --workspace "$WORKSPACE_ROOT" || true
+    fi
 fi
 
 # Install protected paths git hook

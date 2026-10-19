@@ -185,6 +185,9 @@ PRs against it, push to it or tag. Both branches require a PR and passing checks
 `lint-and-syntax`, `unit-tests` and `docker-smoke`, and forbid force-push and
 deletion. Process and releases: [CONTRIBUTING.md](../CONTRIBUTING.md).
 
+Fixes to the package go upstream as PRs against `develop`. Personal changes (config,
+personas, skills) go in the private overlay, never in a fork: see [OVERLAY.md](OVERLAY.md).
+
 You need an authenticated `gh` (`gh auth login`, or `GH_TOKEN` in the environment).
 
 **An install made by `install.sh` is a clone of upstream** (`origin` =

@@ -55,6 +55,9 @@ docker-compose.override.yml
 
 *.tsbuildinfo
 
+# Per-install overlay: its own git repo (docs/OVERLAY.md)
+overlay/
+
 # Composed prompts (debug aid, never the source)
 agents/*/SYSTEM_PROMPT.generated.md
 agents/*/shards/*.generated.md

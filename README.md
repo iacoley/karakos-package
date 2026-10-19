@@ -254,6 +254,7 @@ A Raspberry Pi 4 or 5, a mini PC, or a small VM all work.
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | You want to know how it actually works |
 | [EXTENDING.md](docs/EXTENDING.md) | Adding skills, tools or agents |
 | [UPGRADING.md](docs/UPGRADING.md) | Moving to a new release, or from 1.x to 2.0 |
+| [OVERLAY.md](docs/OVERLAY.md) | Keeping your config, personas and skills in a private overlay repo instead of a fork |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Sending a patch |
 | Agents: [AGENTS.md](AGENTS.md), [docs/AGENT_GUIDE.md](docs/AGENT_GUIDE.md) | A coding agent installing, repairing, improving or contributing to Karakos |
 
