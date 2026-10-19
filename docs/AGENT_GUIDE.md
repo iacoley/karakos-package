@@ -82,7 +82,8 @@ heartbeats are `data/health/*.json` and `data/health/agents/<agent>.json`. The f
 tree is in [ARCHITECTURE.md](ARCHITECTURE.md#data-layout). The signals channel
 gets health alerts (`bin/health-monitor.py` daily, `bin/wedge-check.py` every minute).
 For a one-shot, read-only check of the whole install from inside the container, run
-`python3 bin/self-diagnose.py` (add `--json` for tools; exit 1 on any warn or critical).
+`python3 bin/self-diagnose.py` (add `--json` for tools; exit 1 on any warn or critical). `python3 bin/self-test.py` runs that, then calls one
+read-only tool on each MCP server and reports PASS or FAIL per step.
 
 ## Self-repair
 
