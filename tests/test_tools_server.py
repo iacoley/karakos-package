@@ -69,6 +69,16 @@ def test_discover_skills_loads_tools_json_skill(tools_server, tmp_path):
     assert tools[0]["_skill_dir"] == str(skill_dir)
 
 
+def test_procedure_skill_is_not_a_tool_and_not_an_error(tools_server, tmp_path, capsys):
+    d = tmp_path / "skills" / "proc"
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_text("---\nname: proc\ndescription: a procedure\n---\nSteps.\n")
+    assert tools_server.discover_skills() == []
+    assert capsys.readouterr().err == ""
+    r = tools_server.handle_core_tool("skill", {"action": "list"})
+    assert r["skills"][0]["name"] == "proc" and r["skills"][0]["kind"] == "procedure"
+
+
 def test_frontmatter_only_skill_is_skipped_with_diagnostic(tools_server, tmp_path, capsys):
     """Issue #84: a SKILL.md with no tools.json must not vanish silently —
     stderr must name the specific file and say why it was skipped."""
@@ -76,7 +86,7 @@ def test_frontmatter_only_skill_is_skipped_with_diagnostic(tools_server, tmp_pat
     skill_dir.mkdir(parents=True)
     skill_md = skill_dir / "SKILL.md"
     skill_md.write_text(
-        "---\nname: foo\ndescription: a frontmatter-style skill\n---\n\nBody text.\n"
+        "---\nname: foo\n---\n\nBody text.\n"
     )
 
     tools = tools_server.discover_skills()

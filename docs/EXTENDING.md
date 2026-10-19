@@ -68,7 +68,9 @@ auto-discovered from `.claude/skills/`. Karakos "skills" are a separate,
 package-specific convention — a `tools.json` schema plus a `scripts/`
 implementation, discovered by `mcp/tools-server.py` and exposed as MCP
 tools. A frontmatter-only `SKILL.md` dropped under `skills/` will not load
-here; it needs `tools.json` and `scripts/` as shown below.
+as a tool; it needs `tools.json` and `scripts/` as shown below. With `name`
+and `description` frontmatter it is a *procedure skill* instead: instructions
+only, listed and read with the `skill` tool (see `skills/README.md`).
 
 ### 1. Create the Skill Directory
 

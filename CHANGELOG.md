@@ -16,6 +16,7 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Procedure skills (build A of #235): a `skills/<name>/SKILL.md` with `name`/`description` frontmatter and no `tools.json` is indexed by a new `skill` MCP tool (`list`, `read`, `validate`; `lib/procedure_skills.py`). `validate` checks frontmatter and `tools.json`, then runs `--test-tool` per tool in a subprocess with a timeout. Shipped procedure skills and the approval policy are build B.
 - `bin/buildq doctor [--json]` checks what a build needs (config, queue database, builder and reviewer agents, `claude`/`git`/`gh` per host, GitHub auth) and exits non-zero on any failure. `bin/buildq enable [--no-agents]` turns the queue on, creates the builder and reviewer agents when missing, and runs the doctor. Both work while the queue is disabled.
 - GitHub CLI (`gh`) in the image, from GitHub's apt repository, so builds can open PRs without a host install.
 - Self-management tools in the `karakos-admin` MCP server: `get_usage`, `get_cost`, `tail_log`, `set_effort`, `get_queue`, `pause_agent`, `resume_agent` and `get_findings`. An agent may reload, reset, set effort on, pause or resume only itself, unless it is the primary or the call is an operator's. (Refs #232, "MÍRDAIN G1: `self` ops surface in the admin MCP")
