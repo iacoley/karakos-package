@@ -617,6 +617,10 @@ agents:
     tool_streaming: false
 ```
 
+A channel can override this for itself: `ux.tool_streaming` in its `channels.json`
+entry wins over the agent setting, and unset inherits it (see
+[DISCORD_SETUP.md](DISCORD_SETUP.md#optional-behaviours)).
+
 The lines are throttled, and the throttle is what makes on-by-default safe:
 the first tool call of a turn always posts, then at most one line every
 `TOOL_EVENT_MIN_INTERVAL` seconds, with a hard ceiling of

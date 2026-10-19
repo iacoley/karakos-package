@@ -50,7 +50,7 @@ _SERVER_NAMES = (
     "wall_not_before", "format_attachments", "redact_for_log",
     "send_to_agent", "read_agent_response",
     "kill_agent_subprocess", "start_agent_subprocess",
-    "ux_thread_cfg", "ux_create_thread",
+    "ux_thread_cfg", "ux_create_thread", "ux_tool_streaming",
     # used by the stream reader
     "write_stream_log", "record_rate_limit_event", "write_turn_event",
     "describe_tool_call", "should_post_tool_line", "summarize_tool_call",
@@ -522,7 +522,13 @@ async def read_events(
     # acceptance test requires the lines to appear, and an opt-in nobody
     # knows about does not answer "is it broken?" for the people asking.
     # Set "tool_streaming": false in agents.yaml to go back to silence.
-    tool_streaming = config.get("tool_streaming", True)
+    # Precedence: the channel's ux.tool_streaming, then the agent's, then True.
+    agent_ts = config.get("tool_streaming", True)
+    try:
+        override = state.ux_tool_streaming(channel_id)
+    except Exception:       # a UX lookup must never cost the turn
+        override = None
+    tool_streaming = agent_ts if override is None else override
     stream_to_channel = config.get("stream_to_channel", False)
     # A copy: steered rows join it when the CLI replays them, so the turn's
     # events reach every row the turn answers.

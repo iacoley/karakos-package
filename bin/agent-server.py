@@ -2031,6 +2031,15 @@ def ux_thread_cfg(channel_id) -> Optional["discord_ux.ThreadCfg"]:
     return ux_config().for_channel(name).threads
 
 
+def ux_tool_streaming(channel_id) -> Optional[bool]:
+    """A channel's `ux.tool_streaming` override, or None to inherit the agent's
+    setting. Never raises: a UX lookup must not cost the turn."""
+    try:
+        return ux_for_channel_id(channel_id).tool_streaming
+    except Exception:
+        return None
+
+
 def _ux_now() -> float:
     return time.time()
 

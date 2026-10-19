@@ -1,6 +1,8 @@
 """Optional Discord behaviours (step 6.2). Pure and stdlib only.
 
-Four switches, all off by default, read from config/channels.json:
+Five switches, read from config/channels.json. Four are off by default; the
+fifth, `tool_streaming`, is a per-channel override of the agent's own setting
+(channel > agent `tool_streaming` in agents.yaml > default True):
 
     {"ux": {"suppress_embeds": true},
      "channels": {"general": {"id": "...", "ux": {"threads": {"after_s": 60},
@@ -8,7 +10,7 @@ Four switches, all off by default, read from config/channels.json:
                                                    "reaction_notices": "owner"}}}}
 
 A channel's "ux" object overrides the top-level one key by key; a key set in
-neither is off. A wrong type or an unknown key warns once (in `parse_ux`'s
+neither is off (`tool_streaming`: inherits the agent's setting). A wrong type or an unknown key warns once (in `parse_ux`'s
 warnings) and is treated as off.
 """
 from collections import OrderedDict
@@ -20,7 +22,7 @@ import post_guard
 # Discord message flag 1 << 2. tests/test_discord_ux.py pins it to discord.py.
 SUPPRESS_EMBEDS = 4
 
-KEYS = ("threads", "reaction_notices", "edit_reroute", "suppress_embeds")
+KEYS = ("threads", "reaction_notices", "edit_reroute", "suppress_embeds", "tool_streaming")
 
 THREAD_AFTER_S = 60
 THREAD_MAX_LINES = 40
@@ -50,6 +52,7 @@ class ChannelUx:
     reaction_notices: Optional[str] = None      # None | "owner" | "humans"
     edit_reroute: Optional[EditCfg] = None
     suppress_embeds: bool = False
+    tool_streaming: Optional[bool] = None       # None: inherit the agent's setting
 
 
 _UNSET = object()
@@ -109,14 +112,21 @@ def _parse_bool(v):
     raise ValueError("expected a boolean")
 
 
+def _parse_tool_streaming(v):
+    if isinstance(v, bool):
+        return v
+    raise ValueError("must be true or false")
+
+
 _PARSERS = {
     "threads": _parse_threads,
     "reaction_notices": _parse_reactions,
     "edit_reroute": _parse_edit,
     "suppress_embeds": _parse_bool,
+    "tool_streaming": _parse_tool_streaming,
 }
 _OFF = {"threads": None, "reaction_notices": None, "edit_reroute": None,
-        "suppress_embeds": False}
+        "suppress_embeds": False, "tool_streaming": None}
 
 
 def _parse_block(block, where: str, warnings: List[str]) -> Dict[str, Any]:

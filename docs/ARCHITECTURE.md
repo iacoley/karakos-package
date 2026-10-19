@@ -646,7 +646,8 @@ Hard delete is not an agent action. `taskboard.delete` tombstones a task with
   carries `outbox` (`pending`, `sending`, `dead`, `oldest_pending_age_s`);
   `dead_letters` counts dead rows and `dead_letter_path` is deprecated.
 - **Discord switches** (all off by default; `threads`, `reaction_notices`,
-  `edit_reroute`, `suppress_embeds`): [DISCORD_SETUP.md](DISCORD_SETUP.md#optional-behaviours).
+  `edit_reroute`, `suppress_embeds`; `tool_streaming` is a per-channel override of
+  the agent's setting): [DISCORD_SETUP.md](DISCORD_SETUP.md#optional-behaviours).
 - **Pause and effort.** `/pause [minutes]` and `/resume` hold and release a
   shard's queue (`lib/operator_pause.py`, `data/operator-pause.json`; the turn in
   progress finishes). `/effort <level>` sets an agent-level `--effort` override

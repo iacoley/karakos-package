@@ -284,13 +284,13 @@ CORE_TOOLS = [
     },
     {
         "name": "discord",
-        "description": "Discord server read-only access. Actions: history (view messages), channels (list channels), online (list members).",
+        "description": "Discord server read-only access. Actions: history (view messages), channels (list channels).",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["history", "channels", "online"],
+                    "enum": ["history", "channels"],
                     "description": "The action to perform"
                 },
                 "channel": {
@@ -992,8 +992,6 @@ def handle_core_tool(tool_name: str, args: dict) -> dict:
                 except json.JSONDecodeError:
                     continue
             return {"messages": messages[-limit:], "channel": channel}
-        elif action == "online":
-            return {"error": "Online member list requires Discord API access"}
 
     elif tool_name == "taskboard":
         # Simple file-based task tracking

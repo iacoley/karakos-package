@@ -86,6 +86,33 @@ def test_unknown_key_and_non_object_warn():
     assert len(parse({"channels": {"g": {"id": "1", "ux": [1]}}})[1]) == 1
 
 
+def test_tool_streaming_is_per_channel_and_inherits_when_unset():
+    cfg = {"ux": {"tool_streaming": True},
+           "channels": {"quiet": {"id": "1", "ux": {"tool_streaming": False}},
+                        "loud": {"id": "2"}}}
+    u, warnings = parse(cfg)
+    assert warnings == []
+    assert u.for_channel("quiet").tool_streaming is False
+    assert u.for_channel("loud").tool_streaming is True      # top-level, inherited
+    assert u.for_channel(None).tool_streaming is True
+
+
+@pytest.mark.parametrize("bad", ["yes", 1, 0, None, ["true"]])
+def test_tool_streaming_non_bool_warns_and_is_ignored(bad):
+    cfg = {"channels": {"general": {"id": "1", "ux": {"tool_streaming": bad}}}}
+    u, warnings = parse(cfg)
+    assert len(warnings) == 1
+    assert "tool_streaming" in warnings[0] and "must be true or false" in warnings[0]
+    assert u.for_channel("general").tool_streaming is None   # inherit the agent
+
+
+def test_tool_streaming_unlisted_channel_is_none():
+    u, _ = parse({"channels": {"general": {"id": "1"}}})
+    assert u.for_channel("nope").tool_streaming is None
+    assert u.for_channel(None).tool_streaming is None
+    assert chan({}).tool_streaming is None
+
+
 def test_suppress_embeds_matches_discord_py():
     discord = pytest.importorskip("discord")
     assert ux.SUPPRESS_EMBEDS == discord.MessageFlags.suppress_embeds.flag == 4

@@ -181,9 +181,11 @@ Set `GUEST_TURN_LIMIT` in `config/.env` to change the cap.
 
 Four small behaviours that make a busy channel and a long-running agent easier
 to live with. Every one is **off by default**, so an upgraded install behaves
-exactly as before. They are set in `config/channels.json`: a top-level `"ux"`
+exactly as before. The fifth key, `tool_streaming`, is not one of these: it
+overrides the agent's own setting (see the table). They are set in `config/channels.json`: a top-level `"ux"`
 object applies to every channel, and a channel's own `"ux"` object overrides it
-key by key. A key set in neither place is off. A wrong type or an unknown key is
+key by key. A key set in neither place is off (`tool_streaming` is the exception:
+unset, it inherits the agent's setting). A wrong type or an unknown key is
 logged once and treated as off.
 
 ```json
@@ -204,6 +206,7 @@ logged once and treated as off.
 | `reaction_notices` | `false`, `"owner"` (or `true`), `"humans"` | Tells the agent when a person reacts to one of its messages. The agent normally answers `PASS`, which is not posted. One notice per user and message per minute, at most 10 per channel per minute. | Read Message History |
 | `edit_reroute` | `false`, `true`, or `{"window_s": 900, "max_followups": 3}` | When a person edits a message an agent already received: a still-queued message is rewritten in place, otherwise the agent gets a follow-up with the old and new text. An edit after a `PASS` or empty reply is ignored. | Read Message History |
 | `suppress_embeds` | `false`, `true` | Agent text replies and tool lines are posted with link previews suppressed. Ask prompts keep their embeds. Messages already posted are not changed. | none |
+| `tool_streaming` | `false`, `true`; unset inherits the agent | Turns the `-# ⚙ Tool — …` activity lines on or off for this channel. Precedence: channel `ux.tool_streaming` > agent `tool_streaming` in `agents.yaml` > default `true`. A top-level `ux.tool_streaming` applies to every channel that does not set its own, so it also overrides the agent setting. | none |
 
 `true` for `threads` means `after_s` 60 and `max_lines` 40; `true` for `edit_reroute`
 means `window_s` 900 and `max_followups` 3.

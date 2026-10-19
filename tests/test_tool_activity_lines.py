@@ -193,6 +193,35 @@ def test_tool_lines_can_still_be_turned_off(ags):
     assert posted == []
 
 
+def _listed(ags, ux):
+    """Put CHANNEL in channels.json with a per-channel ux block."""
+    ags.channels_config = {"channels": {"general": {"id": CHANNEL, "ux": ux}}}
+
+
+def test_channel_override_false_silences_an_agent_that_streams(ags):
+    _listed(ags, {"tool_streaming": False})
+    posted = drive(ags, [assistant_event(("Bash", {"command": "npm test"})),
+                         result_event()],
+                   config={"model": "sonnet", "tool_streaming": True})
+    assert posted == []
+
+
+def test_channel_override_true_streams_for_an_agent_that_is_silent(ags):
+    _listed(ags, {"tool_streaming": True})
+    posted = drive(ags, [assistant_event(("Bash", {"command": "npm test"})),
+                         result_event()],
+                   config={"model": "sonnet", "tool_streaming": False})
+    assert [p["content"] for p in posted] == ["-# ⚙ Bash — npm test"]
+
+
+def test_unset_channel_override_inherits_the_agent_setting(ags):
+    _listed(ags, {})
+    posted = drive(ags, [assistant_event(("Bash", {"command": "npm test"})),
+                         result_event()],
+                   config={"model": "sonnet", "tool_streaming": False})
+    assert posted == []
+
+
 def test_silent_mode_posts_nothing(ags):
     """channel_id "0" is the local/headless lane — there is no channel to
     reassure."""
