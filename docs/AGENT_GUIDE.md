@@ -81,6 +81,8 @@ Files, *in container*: `logs/agent-server.log`, `logs/relay.log`,
 heartbeats are `data/health/*.json` and `data/health/agents/<agent>.json`. The full
 tree is in [ARCHITECTURE.md](ARCHITECTURE.md#data-layout). The signals channel
 gets health alerts (`bin/health-monitor.py` daily, `bin/wedge-check.py` every minute).
+For a one-shot, read-only check of the whole install from inside the container, run
+`python3 bin/self-diagnose.py` (add `--json` for tools; exit 1 on any warn or critical).
 
 ## Self-repair
 
