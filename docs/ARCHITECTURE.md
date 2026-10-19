@@ -281,6 +281,7 @@ Replaces cron, with the container's full environment. The loop ticks every
 | Flush deferred messages | every 5 min | `bin/flush-deferred-messages.py` |
 | Claude CLI rollback guard | at startup, then hourly | `bin/cli-upgrade-watchdog.sh` |
 | Memory consolidation | daily 03:00 | `lib/monitor_jobs/memory_consolidate.py` (also `bin/graph-consolidate.py [--dry-run]`) |
+| Friction sensor | hourly, offset :10 | `lib/monitor_jobs/friction_sensor.py` (also `bin/friction-sensor.py [--summary]`): scans `logs/agent-streams/` for tool errors, non-zero Bash exits, denials, rate-limit pressure and repeated commands; appends to `data/friction-log.jsonl`, refreshes `data/friction/weekly.md`. No LLM, read-only on the logs |
 | Health monitor | daily 04:00 | `bin/health-monitor.py` |
 | Data purge | daily 04:30 | `bin/purge-data.py` |
 | Update check | Mondays 05:00 | `bin/check-updates.sh` — pokes signals on a new release |
@@ -748,6 +749,8 @@ data/                                  # named volume
 │   ├── claude-cli.json                # known-good CLI version
 │   └── wedge-check-state.json
 ├── taskboard.json
+├── friction-log.jsonl                 # friction sensor events (hourly scan)
+├── friction/weekly.md                 # 7-day friction summary
 ├── outbox/outbox.db                   # durable Discord replies: retry + audit (6.1)
 ├── build-queue.db                     # build queue (when enabled)
 ├── discord-dead-letter.jsonl.migrated # 1.x dead letters, imported into the outbox and kept

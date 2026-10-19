@@ -14,6 +14,10 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Friction sensor (no LLM): `lib/friction.py`, `bin/friction-sensor.py` and an hourly `friction-sensor` job scan the agent stream logs for tool errors, non-zero Bash exits, denials, rate-limit pressure and repeated commands, append to `data/friction-log.jsonl` and refresh `data/friction/weekly.md`. Read-only: nothing edits a prompt or persona. (Refs #237, build A; the nightly review and `friction` MCP action are build B)
+
 ## [2.1.0] - 2026-10-19
 
 ### Changed
