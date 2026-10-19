@@ -613,6 +613,17 @@ job (`lib/graph/consolidate.py`) builds episodes from the previous day's
 messages, decays and archives them, merges duplicates, tidies entities and
 backfills embeddings.
 
+**Cleaning memory:** agents delete softly. `memory.forget` archives one
+observation and `memory.supersede` replaces it with new text (the old row gets
+`superseded_by`); both drop out of recall. `graph.delete_entity` archives an
+entity and removes its edges, `graph.delete_edge` removes one relation, and
+`graph.merge_entities` folds one entity into another (observations, mentions,
+aliases and edges move; the old name keeps resolving). Every call writes a
+`memory_audit` row with the agent, reason and, for edges, the removed row.
+The table is created on first use, so the schema version does not change.
+Hard delete is not an agent action. `taskboard.delete` tombstones a task with
+`deleted_at` in `data/taskboard.json`; `list` hides it.
+
 ## Comms
 
 - **Relay routing.** The relay holds the one Discord websocket and sends each

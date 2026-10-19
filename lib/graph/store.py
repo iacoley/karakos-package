@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from lib.graph import embed as _embed_mod
-from lib.graph.schema import GraphNotInitialised, check_schema, ensure_schema
+from lib.graph.schema import AUDIT_DDL, GraphNotInitialised, check_schema, ensure_schema
 
 DB_REL = Path("memory") / "graph.db"
 EDGE_STEP = 0.1
@@ -95,24 +95,34 @@ class GraphStore:
             return conn.execute("SELECT * FROM entities WHERE id=?", (ref,)).fetchone()
         n = norm(ref)
         if kind is not None:
-            row = conn.execute("SELECT * FROM entities WHERE name_norm=? AND kind=?",
-                               (n, kind)).fetchone()
+            row = conn.execute("SELECT * FROM entities WHERE name_norm=? AND kind=? "
+                               "AND archived_at IS NULL", (n, kind)).fetchone()
             if row:
                 return row
             return conn.execute(
                 "SELECT e.* FROM entities e JOIN entity_aliases a ON a.entity_id=e.id "
-                "WHERE a.alias_norm=? AND e.kind=? ORDER BY e.id LIMIT 1", (n, kind)).fetchone()
-        row = conn.execute("SELECT * FROM entities WHERE name_norm=? ORDER BY id LIMIT 1",
-                           (n,)).fetchone()
+                "WHERE a.alias_norm=? AND e.kind=? AND e.archived_at IS NULL "
+                "ORDER BY e.id LIMIT 1", (n, kind)).fetchone()
+        row = conn.execute("SELECT * FROM entities WHERE name_norm=? AND archived_at IS NULL "
+                           "ORDER BY id LIMIT 1", (n,)).fetchone()
         if row:
             return row
         return conn.execute(
             "SELECT e.* FROM entities e JOIN entity_aliases a ON a.entity_id=e.id "
-            "WHERE a.alias_norm=? ORDER BY e.id LIMIT 1", (n,)).fetchone()
+            "WHERE a.alias_norm=? AND e.archived_at IS NULL ORDER BY e.id LIMIT 1",
+            (n,)).fetchone()
 
     def _entity(self, conn, name, kind, summary=None, aliases=()):
         ts = now_iso()
         row = self._find_entity(conn, name, kind)
+        if row is None:
+            gone = conn.execute("SELECT id FROM entities WHERE name_norm=? AND kind=? "
+                                "AND archived_at IS NOT NULL", (norm(name), kind)).fetchone()
+            if gone:  # re-adding a soft-deleted entity brings it back
+                conn.execute("UPDATE entities SET archived_at=NULL, summary=?, updated_at=?, "
+                             "last_seen_at=? WHERE id=?", (summary, ts, ts, gone["id"]))
+                row = conn.execute("SELECT * FROM entities WHERE id=?",
+                                   (gone["id"],)).fetchone()
         created = row is None
         if created:
             cur = conn.execute(
@@ -142,7 +152,7 @@ class GraphStore:
     def _resolve_or_create(self, conn, ref, create=True):
         if isinstance(ref, int):
             row = self._find_entity(conn, ref)
-            if row is None:
+            if row is None or row["archived_at"]:
                 raise KeyError(f"no entity with id {ref}")
             return row["id"]
         row = self._find_entity(conn, ref)
@@ -232,6 +242,136 @@ class GraphStore:
                 (kind, content, eid, imp, imp, confidence, domain, agent, tags, source,
                  created_at or ts, ts, ts, blob, _embed_mod.MODEL_NAME if blob else None))
             return cur.lastrowid, True
+
+    # -- hygiene: soft delete, supersede, merge ------------------------------
+    # Agent-facing deletes never remove an observation or entity row: they set
+    # archived_at / superseded_by and write a memory_audit row. Edges have no
+    # archive column, so a deleted edge is removed and its row kept in the
+    # audit detail. Hard delete is operator-only.
+    def _audit(self, conn, agent, action, target_type, target_id, reason=None, detail=None):
+        conn.execute(AUDIT_DDL)
+        conn.execute(
+            "INSERT INTO memory_audit(at, agent, action, target_type, target_id, reason, detail)"
+            " VALUES (?,?,?,?,?,?,?)",
+            (now_iso(), agent, action, target_type, target_id, reason,
+             json.dumps(detail) if detail is not None else None))
+
+    def forget_observation(self, obs_id, reason=None, agent=None):
+        with self.write() as conn:
+            row = conn.execute("SELECT id, archived_at FROM observations WHERE id=?",
+                               (obs_id,)).fetchone()
+            if row is None:
+                raise KeyError(f"no observation with id {obs_id}")
+            if row["archived_at"]:
+                raise ValueError(f"observation {obs_id} is already forgotten")
+            ts = now_iso()
+            conn.execute("UPDATE observations SET archived_at=?, updated_at=? WHERE id=?",
+                         (ts, ts, obs_id))
+            self._audit(conn, agent, "forget", "observation", obs_id, reason)
+        return obs_id
+
+    def supersede_observation(self, obs_id, text, agent=None, embed=True):
+        text = str(text or "").strip()
+        if not text:
+            raise ValueError("text is empty")
+        blob = _embed_one(text) if embed else None
+        with self.write() as conn:
+            old = conn.execute("SELECT * FROM observations WHERE id=?", (obs_id,)).fetchone()
+            if old is None:
+                raise KeyError(f"no observation with id {obs_id}")
+            if old["archived_at"] or old["superseded_by"]:
+                raise ValueError(f"observation {obs_id} is already forgotten or superseded")
+            ts = now_iso()
+            cur = conn.execute(
+                "INSERT INTO observations(kind, subkind, content, entity_id, importance, "
+                "base_importance, confidence, domain, agent, tags, source, created_at, "
+                "inserted_at, updated_at, embedding, embed_model) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,'write',?,?,?,?,?)",
+                (old["kind"], old["subkind"], text, old["entity_id"], old["importance"],
+                 old["base_importance"], old["confidence"], old["domain"],
+                 agent or old["agent"], old["tags"], ts, ts, ts, blob,
+                 _embed_mod.MODEL_NAME if blob else None))
+            new_id = cur.lastrowid
+            conn.execute("UPDATE observations SET superseded_by=?, updated_at=? WHERE id=?",
+                         (new_id, ts, obs_id))
+            self._audit(conn, agent, "supersede", "observation", obs_id,
+                        detail={"new_id": new_id, "old_content": old["content"]})
+        return new_id
+
+    def delete_entity(self, ref, reason=None, agent=None):
+        with self.write() as conn:
+            row = self._find_entity(conn, ref)
+            if row is None or row["archived_at"]:
+                raise KeyError(f"no entity {ref!r}")
+            eid = row["id"]
+            edges = [dict(r) for r in conn.execute(
+                "SELECT id, src_id, dst_id, relation, weight FROM edges "
+                "WHERE src_id=? OR dst_id=?", (eid, eid))]
+            conn.execute("DELETE FROM edges WHERE src_id=? OR dst_id=?", (eid, eid))
+            ts = now_iso()
+            conn.execute("UPDATE entities SET archived_at=?, updated_at=? WHERE id=?",
+                         (ts, ts, eid))
+            self._audit(conn, agent, "delete_entity", "entity", eid, reason,
+                        {"name": row["name"], "edges_removed": edges})
+        return eid, len(edges)
+
+    def delete_edge(self, src, dst, relation, reason=None, agent=None):
+        with self.write() as conn:
+            s = self._resolve_or_create(conn, src, create=False)
+            d = self._resolve_or_create(conn, dst, create=False)
+            row = conn.execute(
+                "SELECT id, src_id, dst_id, relation, weight FROM edges "
+                "WHERE src_id=? AND dst_id=? AND relation=?", (s, d, relation)).fetchone()
+            if row is None:
+                raise KeyError("no such edge")
+            conn.execute("DELETE FROM edges WHERE id=?", (row["id"],))
+            self._audit(conn, agent, "delete_edge", "edge", row["id"], reason, dict(row))
+        return row["id"]
+
+    def merge_entities(self, src, dst, reason=None, agent=None):
+        """Fold entity `src` into `dst`. `src` is archived, never removed."""
+        with self.write() as conn:
+            s = self._resolve_or_create(conn, src, create=False)
+            d = self._resolve_or_create(conn, dst, create=False)
+            if s == d:
+                raise ValueError("cannot merge an entity into itself")
+            sr = conn.execute("SELECT * FROM entities WHERE id=?", (s,)).fetchone()
+            moved = {"observations": 0, "edges": 0, "edges_dropped": 0}
+            moved["observations"] = conn.execute(
+                "UPDATE observations SET entity_id=? WHERE entity_id=?", (d, s)).rowcount
+            conn.execute("INSERT OR IGNORE INTO observation_mentions(observation_id, entity_id)"
+                         " SELECT observation_id, ? FROM observation_mentions WHERE entity_id=?",
+                         (d, s))
+            conn.execute("DELETE FROM observation_mentions WHERE entity_id=?", (s,))
+            # The old name and aliases keep resolving, now to dst.
+            conn.execute("INSERT OR IGNORE INTO entity_aliases(entity_id, alias_norm) "
+                         "SELECT ?, alias_norm FROM entity_aliases WHERE entity_id=?", (d, s))
+            dn = conn.execute("SELECT name_norm FROM entities WHERE id=?", (d,)).fetchone()[0]
+            if sr["name_norm"] != dn:
+                conn.execute("INSERT OR IGNORE INTO entity_aliases(entity_id, alias_norm) "
+                             "VALUES (?,?)", (d, sr["name_norm"]))
+            conn.execute("DELETE FROM entity_aliases WHERE entity_id=?", (s,))
+            for e in conn.execute("SELECT * FROM edges WHERE src_id=? OR dst_id=?",
+                                  (s, s)).fetchall():
+                ns = d if e["src_id"] == s else e["src_id"]
+                nd = d if e["dst_id"] == s else e["dst_id"]
+                dup = conn.execute("SELECT id FROM edges WHERE src_id=? AND dst_id=? "
+                                   "AND relation=?", (ns, nd, e["relation"])).fetchone()
+                if ns == nd or dup:
+                    conn.execute("DELETE FROM edges WHERE id=?", (e["id"],))
+                    moved["edges_dropped"] += 1
+                else:
+                    conn.execute("UPDATE edges SET src_id=?, dst_id=? WHERE id=?",
+                                 (ns, nd, e["id"]))
+                    moved["edges"] += 1
+            ts = now_iso()
+            # Free the (name_norm, kind) slot so the name can be reused later.
+            conn.execute("UPDATE entities SET archived_at=?, updated_at=?, "
+                         "name_norm=name_norm || ? WHERE id=?", (ts, ts, f"#merged-{s}", s))
+            conn.execute("UPDATE entities SET updated_at=? WHERE id=?", (ts, d))
+            self._audit(conn, agent, "merge_entities", "entity", s, reason,
+                        {"into": d, "name": sr["name"], **moved})
+        return {"from": s, "into": d, **moved}
 
     # -- embeddings --------------------------------------------------------
     def iter_unembedded(self, limit=50):
