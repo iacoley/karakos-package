@@ -1,7 +1,7 @@
 """Friction review (#237 build B): grouping, drafts, report, gated filing."""
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import timedelta, datetime, timezone
 
 import pytest
 
@@ -9,8 +9,9 @@ from conftest import PACKAGE_ROOT, import_script
 from lib import friction_review as fr, job_registry
 
 
-def ev(kind="tool_error", tool="Read", detail="File does not exist: /a/b/c", agent="marvin"):
-    return {"ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+def ev(kind="tool_error", tool="Read", detail="File does not exist: /a/b/c", agent="marvin", ago=0):
+    t = datetime.now(timezone.utc) - timedelta(days=ago)
+    return {"ts": t.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "agent": agent, "kind": kind, "tool": tool, "detail": detail, "stream": "s"}
 
 
@@ -59,8 +60,12 @@ def test_empty_log_still_reports(ws):
     assert "Nothing recurs" in (ws / "data" / "friction" / "2026-10-20.md").read_text()
 
 
+def two_days(**kw):
+    return [ev(**kw), ev(**kw), ev(ago=1, **kw)]
+
+
 def test_filing_requires_approval_and_files_each_cause_once(ws):
-    causes = fr.group([ev()] * 3 + [ev(tool="Grep")] * 3)
+    causes = fr.group(two_days() + two_days(tool="Grep"))
     sent = []
     post = lambda repo, t, b, tok: (sent.append((repo, t)), f"https://x/{len(sent)}")[1]  # noqa: E731
     with pytest.raises(PermissionError):
@@ -74,7 +79,7 @@ def test_filing_requires_approval_and_files_each_cause_once(ws):
 
 
 def test_a_failed_post_keeps_earlier_filings_recorded(ws):
-    causes = fr.group([ev()] * 3 + [ev(tool="Grep")] * 4)
+    causes = fr.group(two_days() + two_days(tool="Grep"))
     calls = []
     def post(repo, t, b, tok):
         calls.append(t)
@@ -105,3 +110,11 @@ def test_registered_as_a_nightly_job():
         assert job_registry.resolve_callable(j.run)
     finally:
         sys.path.remove(str(PACKAGE_ROOT / "lib"))
+
+
+def test_a_cause_seen_on_one_day_is_drafted_but_not_filed(ws):
+    causes = fr.group([ev()] * 5)
+    assert causes[0]["days"] == 1
+    sent = []
+    assert fr.file_issues(ws, causes, "o/r", True, post=lambda *a: sent.append(a)) == []
+    assert sent == []

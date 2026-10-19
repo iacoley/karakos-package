@@ -17,7 +17,7 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - Friction sensor (no LLM): `lib/friction.py`, `bin/friction-sensor.py` and an hourly `friction-sensor` job scan the agent stream logs for tool errors, non-zero Bash exits, denials, rate-limit pressure and repeated commands, append to `data/friction-log.jsonl` and refresh `data/friction/weekly.md`. Read-only: nothing edits a prompt or persona. (Refs #237, build A; the nightly review and `friction` MCP action are build B)
-- Friction review (no LLM): `lib/friction_review.py`, `bin/friction-review.py` and a nightly `friction-review` job group the friction log into recurring causes and write `data/friction/YYYY-MM-DD.md` with a drafted issue and proposed fix each. Nothing is filed or edited automatically: `--file --yes` is the explicit, once-per-cause approval step. (Refs #237, build B; the `friction` MCP action is a follow-up)
+- Friction review (no LLM): `lib/friction_review.py`, `bin/friction-review.py` and a nightly `friction-review` job group the friction log into recurring causes and write `data/friction/YYYY-MM-DD.md` with a drafted issue and proposed fix each. Nothing is filed or edited automatically: `--file --yes` is the explicit, once-per-cause approval step, and only for causes seen on two separate days. (Refs #237, build B; the `friction` MCP action is a follow-up)
 
 ## [2.1.0] - 2026-10-19
 

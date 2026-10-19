@@ -38,6 +38,9 @@ _QUOTED = re.compile(r"(['\"`])[^'\"`]{1,80}\1")
 _PATH = re.compile(r"(?:/[\w.\-]+){2,}")
 
 
+MIN_DAYS = 2  # file only when a cause shows up on this many separate days
+
+
 def _norm(detail: str) -> str:
     s = _PATH.sub("<path>", detail.lower())
     s = _QUOTED.sub("<q>", s)
@@ -58,7 +61,8 @@ def group(rows, min_count=MIN_COUNT) -> list:
         if len(rs) < min_count:
             continue
         out.append({"id": cause_id(kind, tool, norm), "kind": kind, "tool": tool, "pattern": norm,
-                    "count": len(rs), "agents": sorted({r.get("agent", "?") for r in rs}),
+                    "count": len(rs), "days": len({str(r.get("ts", ""))[:10] for r in rs}),
+                    "agents": sorted({r.get("agent", "?") for r in rs}),
                     "example": rs[-1].get("detail", ""), "first": rs[0].get("ts"),
                     "last": rs[-1].get("ts")})
     out.sort(key=lambda c: (-c["count"], c["id"]))
@@ -69,7 +73,7 @@ def draft_issue(c) -> dict:
     title = f"Friction: {c['kind']} on {c['tool']} ({c['count']}x): {c['pattern'][:50]}"
     body = (f"Found by the friction review (cause `{c['id']}`).\n\n"
             f"- Kind: `{c['kind']}`; tool: `{c['tool']}`\n"
-            f"- Seen {c['count']} times by {', '.join(c['agents'])} between {c['first']} and {c['last']}\n"
+            f"- Seen {c['count']} times on {c['days']} day(s) by {', '.join(c['agents'])} between {c['first']} and {c['last']}\n"
             f"- Example: `{c['example']}`\n\n"
             f"Proposed fix: {FIXES.get(c['kind'], 'Investigate the cause.')}\n\n"
             "Drafted from `data/friction-log.jsonl`; reviewed by a person before filing.\n")
@@ -111,8 +115,8 @@ def file_issues(workspace, causes, repo, approved, token=None, post=None) -> lis
     post = post or _post
     done = []
     for c in causes:
-        if c["id"] in filed:
-            continue
+        if c["id"] in filed or c.get("days", 0) < MIN_DAYS:
+            continue  # already filed, or not yet seen on two separate days
         d = draft_issue(c)
         url = post(repo, d["title"], d["body"], token)
         filed[c["id"]] = url
