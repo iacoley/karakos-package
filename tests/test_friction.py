@@ -1,9 +1,10 @@
 """Friction sensor (#237 build A): stream scan, state, summary, job registration."""
 import json
+import sys
 
 import pytest
 
-from conftest import import_script
+from conftest import PACKAGE_ROOT, import_script
 from lib import friction, job_registry
 
 
@@ -135,4 +136,8 @@ def test_missing_dirs_and_corrupt_state_are_tolerated(tmp_path):
 def test_registered_as_an_hourly_job():
     j = {x.name: x for x in job_registry.BUILTIN}["friction-sensor"]
     assert j.run == "monitor_jobs.friction_sensor:run_scheduled" and j.schedule.seconds == 3600
-    assert job_registry.resolve_callable(j.run)
+    sys.path.insert(0, str(PACKAGE_ROOT / "lib"))  # the scheduler runs with lib/ on the path
+    try:
+        assert job_registry.resolve_callable(j.run)
+    finally:
+        sys.path.remove(str(PACKAGE_ROOT / "lib"))

@@ -749,6 +749,8 @@ data/                                  # named volume
 │   ├── claude-cli.json                # known-good CLI version
 │   └── wedge-check-state.json
 ├── taskboard.json
+├── friction-log.jsonl                 # friction sensor events (hourly scan)
+├── friction/weekly.md                 # 7-day friction summary
 ├── outbox/outbox.db                   # durable Discord replies: retry + audit (6.1)
 ├── build-queue.db                     # build queue (when enabled)
 ├── discord-dead-letter.jsonl.migrated # 1.x dead letters, imported into the outbox and kept
