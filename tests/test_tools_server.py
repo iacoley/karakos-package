@@ -107,9 +107,10 @@ def _core(tools_server, name):
 
 def test_core_tools_list_memory_and_graph_with_new_enums(tools_server):
     mem = _core(tools_server, "memory")["inputSchema"]["properties"]["action"]["enum"]
-    assert mem == ["write", "recall", "status", "remember", "facts", "recent"]
+    assert mem == ["write", "recall", "status", "forget", "supersede", "remember", "facts",
+                   "recent"]
     assert _core(tools_server, "graph")["inputSchema"]["properties"]["action"]["enum"] == \
-        ["add_entity", "add_edge"]
+        ["add_entity", "add_edge", "delete_entity", "delete_edge", "merge_entities"]
 
 
 def test_validate_args_rejects_unknown_action_and_non_string_content(tools_server):

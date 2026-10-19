@@ -80,6 +80,10 @@ def memory_tool(args, store, agent) -> dict:
             return _recall(args, store)
         if action == "status":
             return _status(store)
+        if action == "forget":
+            return _forget(args, store, agent)
+        if action == "supersede":
+            return _supersede(args, store, agent)
         if action == "remember":
             return _remember(args, store, agent)
         if action == "facts":
@@ -152,6 +156,45 @@ def _write(args, store, agent, label="write") -> dict:
     out = {"status": "ok", "id": obs_id, "entity_id": entity_id, "created": created,
            "embedded": embedded}
     return out
+
+
+def _obs_id(args):
+    v = args.get("id")
+    if isinstance(v, str) and v.strip().isdigit():
+        v = int(v.strip())
+    if isinstance(v, bool) or not isinstance(v, int):
+        raise _Bad("'id' must be an observation id (from memory.recall)")
+    return v
+
+
+def _reason(args):
+    r = args.get("reason")
+    if r is not None and not isinstance(r, str):
+        raise _Bad("'reason' must be a string")
+    return (r or "").strip()[:500] or None
+
+
+def _forget(args, store, agent) -> dict:
+    oid = _obs_id(args)
+    try:
+        store.forget_observation(oid, _reason(args), agent or None)
+    except (KeyError, ValueError) as e:
+        raise _Bad(str(e.args[0]))
+    return {"status": "ok", "id": oid, "forgotten": True}
+
+
+def _supersede(args, store, agent) -> dict:
+    oid = _obs_id(args)
+    text = args.get("text")
+    if not isinstance(text, str) or not text.strip():
+        raise _Bad("supersede requires non-empty 'text'")
+    if len(text.strip()) > CONTENT_MAX:
+        raise _Bad(f"'text' is too long ({len(text.strip())} > {CONTENT_MAX} chars)")
+    try:
+        new_id = store.supersede_observation(oid, text, agent or None)
+    except (KeyError, ValueError) as e:
+        raise _Bad(str(e.args[0]))
+    return {"status": "ok", "id": new_id, "superseded": oid}
 
 
 def _entity_names(store, ids):
@@ -345,6 +388,12 @@ def graph_tool(args, store, agent) -> dict:
             return _add_entity(args, store)
         if action == "add_edge":
             return _add_edge(args, store)
+        if action == "delete_entity":
+            return _delete_entity(args, store, agent)
+        if action == "delete_edge":
+            return _delete_edge(args, store, agent)
+        if action == "merge_entities":
+            return _merge_entities(args, store, agent)
         return {"error": f"Unknown tool or action: graph.{action}"}
     except _Bad as e:
         return {"error": str(e)}
@@ -409,3 +458,38 @@ def _add_edge(args, store) -> dict:
     except ValueError as e:
         raise _Bad(str(e))
     return {"id": eid, "created": created, "weight": w}
+
+
+def _delete_entity(args, store, agent) -> dict:
+    ref = _ref(args.get("name", args.get("id")), "name")
+    try:
+        eid, edges = store.delete_entity(ref, _reason(args), agent or None)
+    except KeyError as e:
+        raise _Bad(str(e.args[0]))
+    return {"status": "ok", "id": eid, "deleted": True, "edges_removed": edges}
+
+
+def _delete_edge(args, store, agent) -> dict:
+    src = _ref(args.get("src"), "src")
+    dst = _ref(args.get("dst"), "dst")
+    rel = args.get("relation")
+    if not isinstance(rel, str) or not rel.strip():
+        raise _Bad("delete_edge requires a non-empty 'relation'")
+    rel = re.sub(r"\s+", "_", rel.strip().lower())
+    try:
+        eid = store.delete_edge(src, dst, rel, _reason(args), agent or None)
+    except KeyError as e:
+        raise _Bad(str(e.args[0]))
+    return {"status": "ok", "id": eid, "deleted": True}
+
+
+def _merge_entities(args, store, agent) -> dict:
+    src = _ref(args.get("from"), "from")
+    dst = _ref(args.get("into"), "into")
+    try:
+        out = store.merge_entities(src, dst, _reason(args), agent or None)
+    except KeyError as e:
+        raise _Bad(str(e.args[0]))
+    except ValueError as e:
+        raise _Bad(str(e))
+    return {"status": "ok", **out}

@@ -8,6 +8,19 @@ class GraphNotInitialised(Exception):
     """The graph database is missing, empty, or newer than this code."""
 
 
+# Created lazily by the first agent-facing delete on an existing graph (no
+# schema bump), and with everything else on a new one.
+AUDIT_DDL = """CREATE TABLE IF NOT EXISTS memory_audit (
+  id INTEGER PRIMARY KEY,
+  at TEXT NOT NULL,
+  agent TEXT,
+  action TEXT NOT NULL,
+  target_type TEXT NOT NULL,
+  target_id INTEGER,
+  reason TEXT,
+  detail TEXT
+)"""
+
 DDL = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS entities (
@@ -114,6 +127,7 @@ def ensure_schema(conn) -> None:
         raise GraphNotInitialised(
             f"graph schema {row[0]} is newer than this code ({SCHEMA_VERSION})")
     conn.executescript(DDL)
+    conn.execute(AUDIT_DDL)
     conn.execute("INSERT OR IGNORE INTO meta(key, value) VALUES ('graph_schema', ?)",
                  (str(SCHEMA_VERSION),))
     conn.commit()
