@@ -59,7 +59,7 @@
   {
    "agent": "a",
    "channel_id": "10",
-   "content": "batch reply for [<ts>] harness: queued 0\n\n[<ts>] harness: queued 1\n\n[<ts>] harness: queued 2",
+   "content": "batch reply for [<ts>] [#general (channel 10, server local)] harness: queued 0\n\n[<ts>] harness: queued 1\n\n[<ts>] harness: queued 2",
    "dead_letter": true,
    "reply_to": null
   },
@@ -306,7 +306,7 @@
     "held": false,
     "message_id": "m0",
     "processed": 2,
-    "response": "batch reply for [<ts>] harness: queued 0\n\n[<ts>] harness: queued 1\n\n[<ts>] harness: queued 2"
+    "response": "batch reply for [<ts>] [#general (channel 10, server local)] harness: queued 0\n\n[<ts>] harness: queued 1\n\n[<ts>] harness: queued 2"
    },
    {
     "agent": "a",
@@ -318,7 +318,7 @@
     "held": false,
     "message_id": "m1",
     "processed": 2,
-    "response": "batch reply for [<ts>] harness: queued 0\n\n[<ts>] harness: queued 1\n\n[<ts>] harness: queued 2"
+    "response": "batch reply for [<ts>] [#general (channel 10, server local)] harness: queued 0\n\n[<ts>] harness: queued 1\n\n[<ts>] harness: queued 2"
    },
    {
     "agent": "a",
@@ -330,7 +330,7 @@
     "held": false,
     "message_id": "m2",
     "processed": 2,
-    "response": "batch reply for [<ts>] harness: queued 0\n\n[<ts>] harness: queued 1\n\n[<ts>] harness: queued 2"
+    "response": "batch reply for [<ts>] [#general (channel 10, server local)] harness: queued 0\n\n[<ts>] harness: queued 1\n\n[<ts>] harness: queued 2"
    },
    {
     "agent": "a",

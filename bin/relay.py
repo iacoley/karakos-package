@@ -180,6 +180,15 @@ def safe_attachment_name(filename: str, index: int) -> str:
 REPLY_CONTEXT_MAX_CHARS = 1000
 
 
+def server_label(obj) -> str:
+    """Guild name for a Discord channel or message, "dm" outside a guild.
+
+    Queue rows store this as `server`, and the edit lookup matches on it, so
+    every relay path that names a message must use this one helper."""
+    guild = getattr(obj, "guild", None)
+    return guild.name if guild else "dm"
+
+
 def format_reply_context(target, max_chars: int = REPLY_CONTEXT_MAX_CHARS) -> str:
     """Render the replied-to message as a delimited block for the agent.
 
@@ -1739,7 +1748,7 @@ class DiscordAdapter(discord.Client):
             "shard": route.shard,
             "channel": name,
             "channel_id": str(payload.channel_id),
-            "server": "discord",
+            "server": server_label(channel),
             "author": reactor,
             "author_id": str(payload.user_id),
             "is_bot": False,
@@ -1809,7 +1818,7 @@ class DiscordAdapter(discord.Client):
             return
         cached = getattr(payload, "cached_message", None)
         ok, detail, body = await self.agent_server_post_json("/message/edit", {
-            "server": "discord",
+            "server": server_label(channel),
             "message_id": str(payload.message_id),
             "channel_id": str(payload.channel_id),
             "author_id": str(author_id),
@@ -1915,8 +1924,17 @@ class DiscordAdapter(discord.Client):
         """Send message to agent server"""
         agent = route.agent
         channel_name, thread_parent = self.resolve_channel(message.channel)
+        parent = getattr(message.channel, "parent", None)
         if not channel_name:
-            channel_name = "unknown"
+            channel_name = (getattr(message.channel, "name", None)
+                            or getattr(parent, "name", None) or "unknown")
+        if parent is not None:
+            # A thread reads as "parent/thread" so the agent can tell where it is.
+            parent_label = channel_name if thread_parent else getattr(parent, "name", None)
+            thread_label = getattr(message.channel, "name", None)
+            if parent_label and thread_label:
+                channel_name = f"{parent_label}/{thread_label}"
+        guild = getattr(message, "guild", None)
 
         attachments = await self.download_attachments(message)
 
@@ -1934,7 +1952,8 @@ class DiscordAdapter(discord.Client):
             "shard": route.shard,
             "channel": channel_name,
             "channel_id": str(message.channel.id),
-            "server": "discord",
+            "server": server_label(message),
+            "guild_id": str(guild.id) if guild else None,
             "author": message.author.display_name,
             "author_id": str(message.author.id),
             "is_bot": message.author.bot,

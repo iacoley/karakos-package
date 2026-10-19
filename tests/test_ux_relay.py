@@ -71,6 +71,7 @@ class Author:
 class Chan:
     def __init__(self, cid, parent_id=None, messages=None):
         self.id, self.parent_id = cid, parent_id
+        self.guild = SimpleNamespace(id=42, name="Test Guild")
         self.messages = messages or {}
         self.fetches = 0
 
@@ -85,7 +86,7 @@ class Msg:
     def __init__(self, channel, content="hello", author=None, mid=5555, mentions=()):
         self.author = author or Author(MIKE)
         self.channel, self.content, self.id = channel, content, mid
-        self.mentions, self.reference, self.guild = list(mentions), None, SimpleNamespace(id=42)
+        self.mentions, self.reference, self.guild = list(mentions), None, SimpleNamespace(id=42, name="Test Guild")
         self.attachments = []
 
 
@@ -300,7 +301,7 @@ def test_edit_posts_to_edit_route_with_fetched_content(relay, setup):
     a.chans[GENERAL] = Chan(GENERAL, None, {7000: Msg(None, "fixed text", Author(MIKE), 7000)})
     run(a.on_raw_message_edit(edit(cached=SimpleNamespace(content="old text"))))
     assert a.edits == [("/message/edit", {
-        "server": "discord", "message_id": "7000", "channel_id": str(GENERAL),
+        "server": "Test Guild", "message_id": "7000", "channel_id": str(GENERAL),
         "author_id": str(MIKE), "content": "fixed text", "before": "old text"})]
 
 

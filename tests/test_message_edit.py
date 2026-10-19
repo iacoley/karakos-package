@@ -65,6 +65,22 @@ def test_queued_row_is_updated_in_place(harness):
     assert "second, fixed" in h.sent_to("a")[-1]
 
 
+def test_thread_row_uses_its_parent_channel_edit_policy(harness):
+    """A thread row is labelled "parent/thread"; the parent's config governs it."""
+    h = harness(agents=["a", "b"], shards=SHARDS, steering=NO_STEER)
+
+    async def scenario():
+        async with h:
+            h.module.channels_config = UX
+            busy_script(h)
+            await put(h, "m1", "first")
+            await h.wait_for(lambda: row(h, "m1")["processed"] == 1)
+            await put(h, "m2", "second", channel="general/side-quest")
+            assert (await edit(h, "m2", "second, fixed"))["status"] == "updated"
+            await h.wait_idle("a")
+    run(scenario())
+
+
 def test_edit_during_the_turn_inserts_a_followup_on_the_same_shard(harness):
     h = harness(agents=["a", "b"], shards=SHARDS)
 

@@ -2913,7 +2913,8 @@ async def handle_message_edit(request):
     row, followups = await load()
     if row is None:
         return web.json_response({"status": "unknown", "message_id": message_id})
-    cfg = ux_config().for_channel(row["channel"]).edit_reroute
+    # A thread row is labelled "parent/thread"; the parent's config governs it.
+    cfg = ux_config().for_channel((row["channel"] or "").split("/", 1)[0]).edit_reroute
     if cfg is None:
         return web.json_response({"status": "disabled", "message_id": message_id})
 

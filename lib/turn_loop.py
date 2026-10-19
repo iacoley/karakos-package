@@ -219,13 +219,27 @@ def make_state(server_module) -> ServerState:
 AUTOMATED_SENTINEL = "[KARAKOS_AUTOMATED]"  # default; the server passes its own
 
 
+def location_tag(msg) -> str:
+    """Where a queued row was posted: channel name, channel id and server.
+    The name is left out when the relay could not resolve one."""
+    channel = msg["channel"]
+    if channel and channel != "unknown":
+        return f"#{channel} (channel {msg['channel_id']}, server {msg['server']})"
+    return f"channel {msg['channel_id']}, server {msg['server']}"
+
+
 def format_batch(rows, format_attachments, sentinel: str = AUTOMATED_SENTINEL) -> str:
     """Render claimed rows as one user line. All-bot batches get the
     automated-traffic sentinel (a batch with even one human message stays
     unmarked, so a human reply still gets a fresh recall block)."""
     parts = []
+    prev_tag = None
     for msg in rows:
-        part = f"[{msg['created_at']}] {msg['author']}: {msg['content']}"
+        tag = location_tag(msg)
+        # The location is printed only where it changes, to keep batches short.
+        where = f"[{tag}] " if tag != prev_tag else ""
+        prev_tag = tag
+        part = f"[{msg['created_at']}] {where}{msg['author']}: {msg['content']}"
         attachment_lines = format_attachments(msg["attachments"])
         if attachment_lines:
             part = f"{part}\n{attachment_lines}"

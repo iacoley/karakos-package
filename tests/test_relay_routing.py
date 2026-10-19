@@ -86,7 +86,7 @@ class Msg:
         self.id = 5555
         self.mentions = list(mentions)
         self.reference = None
-        self.guild = type("G", (), {"id": 42})()
+        self.guild = type("G", (), {"id": 42, "name": "Test Guild"})()
 
 
 @pytest.fixture

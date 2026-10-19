@@ -498,6 +498,8 @@ account breaker, the token budget and the weekly governor (see
 [Guard rails](#guard-rails)). A gate that defers a drain changes nothing in the
 queue or in shard states and arms a timer to resume.
 
+Each queued row reaches the model as `[created_at] [#channel (channel <id>, server <name>)] author: content`; the location tag is printed only where it differs from the row before (an unresolved channel shows `channel <id>, server <name>`). The relay sets `server` to the Discord guild name (`dm` outside a guild) and a thread's `channel` to `parent/thread`.
+
 ## Queue and sessions
 
 `data/memory/agent-server.db` holds `message_queue`, `sessions`, `cost_events`
