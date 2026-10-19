@@ -63,7 +63,7 @@ def test_tools_list():
     tool_names = {t["name"] for t in resp["result"]["tools"]}
     assert tool_names == {
         "list_agents", "get_health", "reload_agent", "reset_agent", "create_agent",
-        "get_usage", "get_cost", "tail_log", "set_effort", "get_queue",
+        "get_usage", "get_cost", "tail_log", "set_effort", "set_model", "get_queue",
         "pause_agent", "resume_agent", "get_findings",
     }
 
@@ -312,6 +312,21 @@ def test_set_effort_scoped_to_self(admin, http_calls, monkeypatch, tmp_path):
         admin.tool_set_effort({"name": "marvin", "level": "low"})
     admin.tool_set_effort({"name": "worker", "level": "low"})
     assert http_calls == [("POST", "/agents/worker/effort", {"level": "low"})]
+
+
+def test_set_model_posts_and_is_scoped(admin, http_calls, monkeypatch, tmp_path):
+    monkeypatch.setattr(admin, "WORKSPACE_ROOT", tmp_path)
+    _write_agents(tmp_path, {"worker": "builder", "boss": "primary"})
+    monkeypatch.setenv("KARAKOS_AGENT", "worker")
+    with pytest.raises(PermissionError):
+        admin.tool_set_model({"name": "boss", "model": "haiku"})
+    with pytest.raises(ValueError):
+        admin.tool_set_model({"name": "worker", "model": ""})
+    admin.tool_set_model({"name": "worker", "model": "haiku"})
+    monkeypatch.setenv("KARAKOS_AGENT", "boss")
+    admin.tool_set_model({"name": "worker", "model": "default"})
+    assert http_calls == [("POST", "/agents/worker/model", {"model": "haiku"}),
+                          ("POST", "/agents/worker/model", {"model": "default"})]
 
 
 def test_pause_agent_body(admin, http_calls, monkeypatch, no_caller):

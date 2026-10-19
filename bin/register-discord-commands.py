@@ -84,6 +84,11 @@ COMMANDS = [
                      ("low", "medium", "high", "xhigh", "max", "default")]},
         AGENT_OPTION]),
 
+    _cmd("model", "Set an agent's model (ids from config/models.yaml; default removes the override)", [
+        {"name": "model", "description": "Allowed model id, or default",
+         "type": STRING, "required": True, "max_length": 100},
+        AGENT_OPTION]),
+
     # --- shaped arguments ---
     _cmd("logs", "Tail a service log", [
         {"name": "service", "description": "Log name, e.g. relay or agent-server",

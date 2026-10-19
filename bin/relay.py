@@ -94,7 +94,7 @@ SYS_COMMANDS = frozenset({"clear", "reload", "status", "usage"})
 SLASH_COMMANDS = frozenset({
     "status", "health", "usage", "help",
     "cost", "clear", "reload", "interrupt", "kill", "flush",
-    "logs", "pause", "resume", "effort",
+    "logs", "pause", "resume", "effort", "model",
 })
 
 INTERRUPT_MESSAGE_MAX = 1900
@@ -134,6 +134,8 @@ def slash_args(cmd: str, options: Dict) -> str:
         return s("minutes")
     if cmd == "effort":
         return s("level")
+    if cmd == "model":
+        return s("model")
     if cmd == "interrupt":
         return s("message")
     # Everything else is either untargeted or agent-targeted, and the target
@@ -1273,6 +1275,8 @@ class DiscordAdapter(discord.Client):
                 f"`{agent}` resumed." if ok else f"resume failed for `{agent}` — {detail}")
         elif cmd == "effort":
             await self.sys_effort(message, agent, args)
+        elif cmd == "model":
+            await self.sys_model(message, agent, args)
         elif cmd == "cost":
             await self.sys_cost(message, agent)
 
@@ -1327,6 +1331,26 @@ class DiscordAdapter(discord.Client):
         applied, deferred = body.get("applied") or [], body.get("deferred") or []
         now = body.get("effort") or "the CLI default"
         parts = [f"`{agent}` effort is now {now}."]
+        if applied:
+            parts.append("Applied now: " + ", ".join(f"`{x}`" for x in applied) + ".")
+        if deferred:
+            parts.append("After the current turn: " + ", ".join(f"`{x}`" for x in deferred) + ".")
+        await self.sys_reply(message, " ".join(parts))
+
+    async def sys_model(self, message, agent: str, args: str):
+        """Set the agent-level model override (owner only). The allowed ids live
+        in config/models.yaml; the agent server checks them."""
+        model = args.strip()
+        if not model:
+            await self.sys_reply(message, "usage: /model <model id|default>")
+            return
+        ok, detail, body = await self.agent_server_post_json(
+            f"/agents/{agent}/model", {"model": model})
+        if not ok:
+            await self.sys_reply(message, f"model failed for `{agent}` — {detail}")
+            return
+        applied, deferred = body.get("applied") or [], body.get("deferred") or []
+        parts = [f"`{agent}` model is now {body.get('model')} ({body.get('source')})."]
         if applied:
             parts.append("Applied now: " + ", ".join(f"`{x}`" for x in applied) + ".")
         if deferred:

@@ -5,6 +5,10 @@ A new file the server creates on first use; it holds no 1.x data and the
 registry file is never edited at runtime. Written atomically, read tolerantly
 (missing or corrupt means no overrides), read at every spawn.
 
+The same file holds the agent-level `model` (issue 233). The allowed model ids
+are listed in `config/models.yaml` (`allowed: [...]`), never in code. With no
+readable list, only the agent's own registry model is allowed.
+
 Effective effort: override, else the registry `effort`, else None (the CLI's
 own default; the flag is omitted).
 """
@@ -92,3 +96,57 @@ def cli_supports_effort() -> bool:
         except Exception:  # noqa: BLE001
             _cli_has_effort = True
     return _cli_has_effort
+
+
+MODELS_CONFIG = ("config", "models.yaml")
+
+
+def allowed_models(workspace, config: Optional[dict] = None) -> list:
+    """Model ids a runtime switch may use: `allowed` in config/models.yaml.
+    Missing or unreadable: just the agent's registry model, if it has one."""
+    try:
+        import yaml
+        raw = yaml.safe_load(Path(workspace).joinpath(*MODELS_CONFIG).read_text()) or {}
+        ids = raw.get("allowed")
+        if isinstance(ids, list):
+            out = [m for m in ids if isinstance(m, str) and m]
+            if out:
+                return out
+    except Exception as e:  # noqa: BLE001 - absent file is the normal case
+        if not isinstance(e, FileNotFoundError):
+            _log.warning(f"models config unreadable ({e}); using the registry model only")
+    m = (config or {}).get("model")
+    return [m] if isinstance(m, str) and m else []
+
+
+def set_model(workspace, agent: str, model: str, config: Optional[dict] = None) -> Optional[str]:
+    """Record the model override (`default` removes it). Returns the stored id or
+    None. Raises ValueError for an id outside the allowed list."""
+    agents = load(workspace)
+    if model == DEFAULT:
+        entry = agents.get(agent, {})
+        entry.pop("model", None)
+        if entry:
+            agents[agent] = entry
+        else:
+            agents.pop(agent, None)
+        _save(workspace, agents)
+        return None
+    allowed = allowed_models(workspace, config)
+    if model not in allowed:
+        raise ValueError(f"model must be one of {', '.join(allowed + [DEFAULT])}")
+    agents.setdefault(agent, {})["model"] = model
+    _save(workspace, agents)
+    return model
+
+
+def effective_model(workspace, agent: str, config: Optional[dict]) -> Tuple[str, str]:
+    """(model, source: override | registry | default). An override that has left
+    the allowed list since it was set is ignored."""
+    m = (load(workspace).get(agent) or {}).get("model")
+    if isinstance(m, str) and m in allowed_models(workspace, config):
+        return m, "override"
+    m = (config or {}).get("model")
+    if isinstance(m, str) and m:
+        return m, "registry"
+    return "sonnet", "default"
