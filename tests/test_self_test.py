@@ -12,6 +12,7 @@ st = import_script("self-test")
 @pytest.fixture
 def ws(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENT_SERVER_URL", "http://127.0.0.1:9")  # nothing listens
+    monkeypatch.setenv("AGENT_SERVER_TOKEN", "test-token")
     (tmp_path / "data").mkdir()
     (tmp_path / "logs").mkdir()
     return tmp_path
