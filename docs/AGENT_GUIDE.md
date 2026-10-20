@@ -123,6 +123,21 @@ act on the calling agent only. A primary agent (`role: primary` in `config/agent
 operator with no agent identity may act on any agent. Anyone else gets a permission error:
 ask the primary agent or the owner.
 
+### Protected paths at edit time
+
+The paths in `config/protected-paths.json` are guarded when you edit them, not only at commit. The
+PreToolUse hook `system/hooks/protected-paths-edit.py` runs on `Edit`, `Write`, `MultiEdit`,
+`NotebookEdit` and on Bash commands that write through `tee`, `cp`, `mv`, `rm`, `sed`, `install`, `ln`,
+`truncate`, `dd`, `chmod`, `chown` or `patch`.
+
+- A tier 1 path is denied with `Protected path (tier 1): <path>. Do not edit it; report to the owner.`
+  Do not work around it: tell the owner which path you needed to change and why.
+- A tier 2 path is allowed and recorded in `logs/protected-edits.jsonl` (`ts`, `agent`, `tool`, `path`, `tier`, `decision`). Tier 1 denies are recorded there too.
+- Paths in `unprotected_overrides` (persona, journal, inbox) are allowed and not logged.
+- It applies to agents only (`KARAKOS_AGENT` is set). An operator's own `claude` session is not restricted.
+- Symlinks are resolved first, so a link to a protected file is protected. Paths outside the workspace are not.
+- Known gap: shell redirections (`echo x > bin/relay.py`) and interpreters that write files themselves (`python -c`, `perl -i`) are not detected. Commit-time protection still applies.
+
 ## Self-improve
 
 **Local customisations stay local.** Persona, journals, skills for this household,

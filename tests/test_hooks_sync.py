@@ -32,6 +32,7 @@ def test_defaults_created_and_rails_wired(ws):
     cmds = commands(load(ws))
     assert any(c.endswith("bash-safety-rails.py") for c in cmds)
     assert any(c.endswith("block-bare-ssh.py") for c in cmds)
+    assert sum(c.endswith("protected-paths-edit.py") for c in cmds) == 1  # one group: file tools + Bash
     assert not any("block-heavy-build" in c for c in cmds)
 
 

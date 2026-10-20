@@ -16,6 +16,7 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Edit-time protected-path gate: the PreToolUse hook `system/hooks/protected-paths-edit.py` denies agent `Edit`, `Write`, `MultiEdit`, `NotebookEdit` and file-writing Bash commands (`tee`, `cp`, `mv`, `rm`, `sed` and others) on tier 1 paths from `config/protected-paths.json`, and logs tier 2 edits to `logs/protected-edits.jsonl`. Agents only; shell redirections are not detected. (Refs #240, "MÍRDAIN G9: Edit-time protected-path gate and a governed self-mod tool"; build A)
 - Procedure skills (build A of #235): a `skills/<name>/SKILL.md` with `name`/`description` frontmatter and no `tools.json` is indexed by a new `skill` MCP tool (`list`, `read`, `validate`; `lib/procedure_skills.py`). `validate` checks frontmatter and `tools.json`, then runs `--test-tool` per tool in a subprocess with a timeout. Shipped procedure skills and the approval policy are build B.
 - `bin/buildq doctor [--json]` checks what a build needs (config, queue database, builder and reviewer agents, `claude`/`git`/`gh` per host, GitHub auth) and exits non-zero on any failure. `bin/buildq enable [--no-agents]` turns the queue on, creates the builder and reviewer agents when missing, and runs the doctor. Both work while the queue is disabled.
 - GitHub CLI (`gh`) in the image, from GitHub's apt repository, so builds can open PRs without a host install.

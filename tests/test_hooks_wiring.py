@@ -196,6 +196,7 @@ def test_spawn_argv_settings_carry_new_hooks(tmp_workspace, monkeypatch):
     used = json.loads(open(cmd[cmd.index("--settings") + 1]).read())
     text = json.dumps(used["hooks"])
     assert "bash-safety-rails.py" in text and "block-bare-ssh.py" in text
+    assert "protected-paths-edit.py" in text
     assert "sleep-poll" not in text
 
 
