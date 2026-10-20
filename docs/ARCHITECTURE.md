@@ -617,6 +617,12 @@ job (`lib/graph/consolidate.py`) builds episodes from the previous day's
 messages, decays and archives them, merges duplicates, tidies entities and
 backfills embeddings.
 
+**Entity dedup:** `bin/graph-dedup.py` (`lib/graph/entity_dedup.py`) finds live
+entities of one kind whose embeddings have cosine similarity of at least 0.92 and
+folds the one with fewer observations into the other with `merge_entities`. It
+lists pairs by default; `--live` merges at most 50 per run. The nightly job can
+run it on Sundays when `MEMORY_ENTITY_DEDUP` is `report` or `live`.
+
 **Cleaning memory:** agents delete softly. `memory.forget` archives one
 observation and `memory.supersede` replaces it with new text (the old row gets
 `superseded_by`); both drop out of recall. `graph.delete_entity` archives an

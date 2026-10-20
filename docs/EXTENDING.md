@@ -451,6 +451,7 @@ want to edit:
 | Variable | Description |
 |---|---|
 | `STREAM_LOG_RETENTION_DAYS` / `HANDOFF_TURN_TIMEOUT_S` | Raw stream-log retention (default 7) and the wait for a context-handoff turn |
+| `MEMORY_ENTITY_DEDUP` | `report` or `live` turns on the Sunday entity dedup pass of the nightly job (`bin/graph-dedup.py`); unset is off |
 | `MEMORY_DECAY_RATE` | Episode importance decay per pass (0–1), applied from `base_importance` |
 | `MEMORY_CUTOFF` | Importance below which an episode is eligible to be dropped |
 | `MEMORY_PRUNE_GRACE_DAYS` | Days an episode is protected from pruning regardless of score, measured from `inserted_at`; default 7 |
