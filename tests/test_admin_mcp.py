@@ -64,6 +64,7 @@ def test_tools_list():
     assert tool_names == {
         "list_agents", "get_health", "reload_agent", "reset_agent", "create_agent",
         "get_usage", "get_cost", "tail_log", "set_effort", "set_model", "get_queue",
+        "snapshot_persona", "restore_persona",
         "pause_agent", "resume_agent", "get_findings",
     }
 

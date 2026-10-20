@@ -21,6 +21,8 @@ Tools:
   - get_queue         GET  /agents/{name}/queue
   - pause_agent       POST /agents/{name}/pause       (self-scoped)
   - resume_agent      POST /agents/{name}/resume      (self-scoped)
+  - snapshot_persona  copy agents/<name>/persona/ and SYSTEM_PROMPT.md aside (self-scoped)
+  - restore_persona   put a snapshot back; the current state is snapshotted first (self-scoped)
   - get_findings      data/health/summary.md
 
 Self-scoped tools (reload, reset, effort, pause, resume) let an agent act on
@@ -41,6 +43,7 @@ import sys
 from collections import deque
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 from _handshake import initialize_result  # noqa: E402
 from urllib import error as urlerror
 from urllib import request as urlrequest
@@ -104,7 +107,40 @@ def tool_reload_agent(args: dict) -> dict:
     if not name or not NAME_RE.match(name):
         raise ValueError(f"invalid agent name: {name!r}")
     _check_scope(name)
-    return _http("POST", f"/agents/{name}/reload")
+    snap = _snapshot_if_changed(name, "before reload")
+    result = _http("POST", f"/agents/{name}/reload")
+    if snap and isinstance(result, dict):
+        result["persona_snapshot"] = snap["snapshot_id"]
+    return result
+
+
+def _snapshot_if_changed(name: str, reason: str):
+    """Best effort: a failed snapshot never blocks the reload."""
+    try:
+        import persona_snapshots
+        return persona_snapshots.snapshot_if_changed(WORKSPACE_ROOT, name, reason)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def tool_snapshot_persona(args: dict) -> dict:
+    import persona_snapshots
+    name = _agent_name(args.get("name"))
+    _check_scope(name)
+    try:
+        return persona_snapshots.snapshot(WORKSPACE_ROOT, name, args.get("reason") or "manual")
+    except LookupError as e:
+        raise ValueError(str(e)) from e
+
+
+def tool_restore_persona(args: dict) -> dict:
+    import persona_snapshots
+    name = _agent_name(args.get("name"))
+    _check_scope(name)
+    try:
+        return persona_snapshots.restore(WORKSPACE_ROOT, name, args.get("snapshot_id"))
+    except LookupError as e:
+        raise ValueError(str(e)) from e
 
 
 def tool_reset_agent(args: dict) -> dict:
@@ -149,6 +185,8 @@ def tool_create_agent(args: dict) -> dict:
     if sp:
         sp_path = WORKSPACE_ROOT / "agents" / name / "SYSTEM_PROMPT.md"
         sp_path.parent.mkdir(parents=True, exist_ok=True)
+        if (snap := _snapshot_if_changed(name, "before create_agent overwrote SYSTEM_PROMPT.md")):
+            result["persona_snapshot"] = snap["snapshot_id"]
         sp_path.write_text(sp)
         result["system_prompt_written"] = str(sp_path)
         try:
@@ -370,6 +408,32 @@ TOOLS = [
                 "model": {"type": "string", "description": "Allowed model id, or default"},
             },
             "required": ["name", "model"],
+        },
+    },
+    {
+        "name": "snapshot_persona",
+        "description": "Copy agents/<name>/persona/ and SYSTEM_PROMPT.md to data/persona-snapshots/<name>/<id>/ (newest 10 kept). Taken automatically before create_agent overwrites a prompt and before a reload that follows a persona change. Self-scoped.",
+        "handler": tool_snapshot_persona,
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Agent name"},
+                "reason": {"type": "string", "description": "Why (recorded with the snapshot)"},
+            },
+            "required": ["name"],
+        },
+    },
+    {
+        "name": "restore_persona",
+        "description": "Put a persona snapshot back (persona/ and SYSTEM_PROMPT.md). The current state is snapshotted first, so a restore can be undone. Call reload_agent afterwards. Self-scoped.",
+        "handler": tool_restore_persona,
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Agent name"},
+                "snapshot_id": {"type": "string", "description": "Snapshot id, e.g. 20260101T000000Z"},
+            },
+            "required": ["name", "snapshot_id"],
         },
     },
     {

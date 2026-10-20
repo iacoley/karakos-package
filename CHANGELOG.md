@@ -22,6 +22,7 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Persona and prompt rollback (#241): `snapshot_persona` and `restore_persona` admin MCP tools (`lib/persona_snapshots.py`) copy an agent's `persona/` and `SYSTEM_PROMPT.md` to `data/persona-snapshots/<name>/<id>/` (newest 10 kept). Taken automatically before `create_agent` overwrites a prompt and before a `reload_agent` that follows a persona change. A restore snapshots the current state first. Self-scoped like the other admin tools.
 - Per-channel `mention_only` in channels.json and per-agent `discord.role_id_env`, so a role ping routes to the agent. (Refs #244)
 - Edit-time protected-path gate: the PreToolUse hook `system/hooks/protected-paths-edit.py` denies agent `Edit`, `Write`, `MultiEdit`, `NotebookEdit` and file-writing Bash commands (`tee`, `cp`, `mv`, `rm`, `sed` and others) on tier 1 paths from `config/protected-paths.json`, and logs tier 2 edits to `logs/protected-edits.jsonl`. Agents only; shell redirections are not detected. (Refs #240, "MÍRDAIN G9: Edit-time protected-path gate and a governed self-mod tool"; build A)
 - Procedure skills (build A of #235): a `skills/<name>/SKILL.md` with `name`/`description` frontmatter and no `tools.json` is indexed by a new `skill` MCP tool (`list`, `read`, `validate`; `lib/procedure_skills.py`). `validate` checks frontmatter and `tools.json`, then runs `--test-tool` per tool in a subprocess with a timeout. Shipped procedure skills and the approval policy are build B.
