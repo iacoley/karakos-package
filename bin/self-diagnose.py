@@ -3,7 +3,7 @@
 
 Usage: self-diagnose.py [--json] [--sections a,b] [--workspace DIR]
 Exit 0 when nothing is worse than info, 1 when any warn or critical finding.
-Sections: health, findings, heartbeats, hook, disk, schema, logs.
+Sections: health, findings, heartbeats, hook, disk, schema, logs, buildqueue, version.
 Not a replacement for `make preflight` (host-side); this runs inside the install.
 """
 from __future__ import annotations
@@ -17,7 +17,8 @@ from pathlib import Path
 from urllib import error as urlerror, request as urlrequest
 
 RANK = {"critical": 0, "warn": 1, "info": 2}
-SECTIONS = ("health", "findings", "heartbeats", "hook", "disk", "schema", "logs")
+SECTIONS = ("health", "findings", "heartbeats", "hook", "disk", "schema", "logs", "buildqueue", "version")
+QUEUE_STUCK_S = 3600
 OUTBOX_STUCK_S = 600
 DISK_WARN, DISK_CRIT = 0.90, 0.97
 LOG_TAIL_BYTES = 64 * 1024
@@ -141,8 +142,59 @@ def check_logs(ws):
     return out
 
 
+def check_buildqueue(ws):
+    """Only when config/build-queue.yaml has `enabled: true`: a row queued for over
+    an hour means the dispatcher is not taking work. Read-only."""
+    import sqlite3
+    from datetime import datetime, timezone
+    try:
+        import yaml
+        cfg = yaml.safe_load((Path(ws) / "config" / "build-queue.yaml").read_text()) or {}
+    except Exception:  # noqa: BLE001 - no file or unreadable: the queue is off
+        return []
+    if cfg.get("enabled") is not True:
+        return []
+    db = Path(ws) / "data" / "build-queue.db"
+    if not db.is_file():
+        return [_f("buildqueue", "warn", "build queue is enabled but data/build-queue.db is missing")]
+    conn = sqlite3.connect(db.as_uri() + "?mode=ro", uri=True)
+    try:
+        queued = conn.execute("SELECT MIN(created_at), COUNT(*) FROM build_queue "
+                              "WHERE status='queued'").fetchone()
+        running = conn.execute("SELECT COUNT(*) FROM build_queue WHERE status='running'").fetchone()[0]
+    finally:
+        conn.close()
+    oldest, n = queued
+    if not n:
+        return []
+    try:
+        age = (datetime.now(timezone.utc)
+               - datetime.fromisoformat(oldest.replace("Z", "+00:00"))).total_seconds()
+    except (ValueError, AttributeError):
+        return [_f("buildqueue", "info", f"{n} build(s) queued, {running} running")]
+    if age > QUEUE_STUCK_S and not running:
+        return [_f("buildqueue", "warn",
+                   f"{n} build(s) queued, oldest {int(age // 60)} min, none running")]
+    return [_f("buildqueue", "info", f"{n} build(s) queued, {running} running")]
+
+
+def check_version(ws):
+    """The code's VERSION against the package version that last stamped the data."""
+    try:
+        code = (Path(ws) / "VERSION").read_text().strip()
+    except OSError:
+        return [_f("version", "info", "no VERSION file; cannot compare")]
+    stamp = _read_json(Path(ws) / "data" / ".schema-version") or {}
+    stamped = stamp.get("package")
+    if code and isinstance(stamped, str) and stamped != code:
+        return [_f("version", "info",
+                   f"code is {code}, data was last stamped by {stamped} (karakos migrate restamps)")]
+    return []
+
+
 CHECKS = {"health": check_health, "findings": check_findings, "heartbeats": check_heartbeats,
-          "hook": check_hook, "disk": check_disk, "schema": check_schema, "logs": check_logs}
+          "hook": check_hook, "disk": check_disk, "schema": check_schema, "logs": check_logs,
+          "buildqueue": check_buildqueue, "version": check_version}
 
 
 def diagnose(ws, sections=None):
