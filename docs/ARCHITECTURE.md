@@ -657,7 +657,10 @@ Hard delete is not an agent action. `taskboard.delete` tombstones a task with
   progress finishes). `/effort <level>` sets an agent-level `--effort` override
   (`lib/runtime_overrides.py`, `data/runtime-overrides.json`); the registry file
   is never edited at runtime. Routes: `POST /agents/{name}/pause`, `/resume`,
-  `/effort`.
+  `/effort`. `/model <id>` does the same for the agent's model: the ids it
+  accepts are listed in `config/models.yaml` (without that file, only the agent's
+  registry model), a change lands after the turn in flight, and the route is
+  `POST /agents/{name}/model`.
 
 ## Monitoring
 
@@ -757,7 +760,7 @@ data/                                  # named volume
 ├── build-queue.db                     # build queue (when enabled)
 ├── discord-dead-letter.jsonl.migrated # 1.x dead letters, imported into the outbox and kept
 ├── operator-pause.json                # /pause holds, keyed by shard id
-├── runtime-overrides.json             # /effort overrides, keyed by agent id
+├── runtime-overrides.json             # /effort and /model overrides, keyed by agent id
 ├── migration-reports/                 # migration-report.md from the migrator
 ├── handoff/<shard>.md                 # note for the next fresh session (rotated)
 └── stop-hook-extensions.json

@@ -14,6 +14,10 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Runtime model switching (#233): `/model` slash command, `POST /agents/{name}/model` and a `set_model` admin MCP tool set an agent-level model override in `data/runtime-overrides.json`, applied at the next spawn (after the turn in flight, like `/effort`). Allowed ids are listed in the new `config/models.yaml` (aliases `opus`, `sonnet`, `haiku` by default), not in code; without that file only the agent's registry model is allowed. An agent may switch only its own model; the primary may switch any. Touches tier-1 `bin/agent-server.py` and `bin/relay.py`: maintainer review.
+
 ## [2.2.0] - 2026-10-19
 
 ### Added

@@ -114,11 +114,12 @@ The `karakos-admin` MCP tools (`mcp/admin-server.py`) let an agent look at and s
 - `get_cost`: spend for every agent, or one with `agent` (`GET /cost`, `GET /cost/<agent>`).
 - `tail_log`: last lines of `logs/<service>.log`, secrets redacted (default 40, max 200).
 - `set_effort`: set reasoning effort: low, medium, high, xhigh, max, or default.
+- `set_model`: set the model to an id listed in `config/models.yaml`, or `default` to drop the override.
 - `get_queue`: what an agent still has to answer.
 - `pause_agent` / `resume_agent`: hold or release a queue, optionally for 1-1440 minutes.
 - `get_findings`: the latest health findings summary.
 
-Self-scoping: `reload_agent`, `reset_agent`, `set_effort`, `pause_agent` and `resume_agent`
+Self-scoping: `reload_agent`, `reset_agent`, `set_effort`, `set_model`, `pause_agent` and `resume_agent`
 act on the calling agent only. A primary agent (`role: primary` in `config/agents.yaml`) or an
 operator with no agent identity may act on any agent. Anyone else gets a permission error:
 ask the primary agent or the owner.

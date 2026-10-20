@@ -1,0 +1,7 @@
+# Model ids a runtime switch (/model, the set_model admin tool) may select.
+# Edit to match what your account can use. Without this file, only an agent's
+# registry model is allowed. Re-read on every switch and every spawn.
+allowed:
+  - opus
+  - sonnet
+  - haiku

@@ -17,6 +17,7 @@ Tools:
   - get_cost          GET  /cost, or /cost/{agent}
   - tail_log          last N lines of logs/<service>.log (redacted)
   - set_effort        POST /agents/{name}/effort      (self-scoped)
+  - set_model         POST /agents/{name}/model       (self-scoped)
   - get_queue         GET  /agents/{name}/queue
   - pause_agent       POST /agents/{name}/pause       (self-scoped)
   - resume_agent      POST /agents/{name}/resume      (self-scoped)
@@ -244,6 +245,15 @@ def tool_set_effort(args: dict) -> dict:
     return _http("POST", f"/agents/{name}/effort", {"level": level})
 
 
+def tool_set_model(args: dict) -> dict:
+    name = _agent_name(args.get("name"))
+    model = args.get("model")
+    if not isinstance(model, str) or not model.strip():
+        raise ValueError("model is required (an allowed id from config/models.yaml, or default)")
+    _check_scope(name)
+    return _http("POST", f"/agents/{name}/model", {"model": model.strip()})
+
+
 def tool_get_queue(args: dict) -> dict:
     name = _agent_name(args.get("name"))
     return _http("GET", f"/agents/{name}/queue")
@@ -347,6 +357,19 @@ TOOLS = [
                 "lines": {"type": "integer", "description": "Lines from the end (1-200, default 40)"},
             },
             "required": ["service"],
+        },
+    },
+    {
+        "name": "set_model",
+        "description": "Set an agent's model: an id listed in config/models.yaml, or default to drop the override. Self-scoped: an agent may set only its own; the primary may set any.",
+        "handler": tool_set_model,
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Agent name"},
+                "model": {"type": "string", "description": "Allowed model id, or default"},
+            },
+            "required": ["name", "model"],
         },
     },
     {

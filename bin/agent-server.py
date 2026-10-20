@@ -843,7 +843,7 @@ async def start_agent_subprocess(shard: str):
         "claude", "-p",
         "--input-format", "stream-json",
         "--output-format", "stream-json",
-        "--model", config.get("model", "sonnet"),
+        "--model", runtime_overrides.effective_model(WORKSPACE_ROOT, agent, config)[0],
         "--max-turns", str(config.get("max_turns", 200)),
         "--verbose",
         "--dangerously-skip-permissions",
@@ -3111,6 +3111,11 @@ async def handle_health(request):
         "outbox": outbox_health(),
     })
 
+def model_info(agent):
+    """(effective model, source) for an agent; every shard shares it."""
+    return runtime_overrides.effective_model(WORKSPACE_ROOT, agent, agent_config.get(agent, {}))
+
+
 def effort_info(agent):
     """(effective level or None, source) for an agent; every shard shares it."""
     return runtime_overrides.effective_effort(WORKSPACE_ROOT, agent, agent_config.get(agent, {}))
@@ -3166,7 +3171,8 @@ async def handle_agents(request):
             # Max over the agent's shards; 0 = unknown. Per-shard values in `shards`.
             "context_tokens": max(r["context_tokens"] for r in shard_rows),
             "shards": shard_rows,
-            "model": config.get("model"),
+            "model": model_info(agent)[0],
+            "model_source": model_info(agent)[1],
             # The same defaults the subprocess is actually launched with (see
             # start_agent). Reporting the raw config.get() would show a blank
             # for every agent that relies on the default, which reads as "not
@@ -3448,6 +3454,47 @@ async def handle_agent_effort(request):
         else:
             applied.append(sh)      # nothing running: the next spawn reads it
     return web.json_response({"effort": effort_info(agent)[0],
+                              "applied": applied, "deferred": deferred})
+
+
+async def handle_agent_model(request):
+    """POST /agents/{name}/model {"model": "<allowed id>"|"default"}.
+    Agent-level like effort: every shard takes it, at once when idle, after the
+    turn in flight otherwise. Allowed ids come from config/models.yaml."""
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer ") or auth_header[7:] != AGENT_SERVER_TOKEN:
+        return web.json_response({"error": "Unauthorized"}, status=401)
+    targets = _resolve_request_targets(request)
+    if not targets:
+        return web.json_response({"error": "Unknown agent"}, status=404)
+    body_in = {}
+    if request.can_read_body:
+        try:
+            parsed = await request.json()
+            body_in = parsed if isinstance(parsed, dict) else {}
+        except ValueError:
+            body_in = {}
+    model = body_in.get("model")
+    agent = STATE.agent_of(targets[0])
+    if not isinstance(model, str) or not model:
+        return web.json_response({"error": "model is required"}, status=400)
+    try:
+        runtime_overrides.set_model(WORKSPACE_ROOT, agent, model, agent_config.get(agent, {}))
+    except ValueError as e:
+        return web.json_response({"error": str(e)}, status=400)
+    shards = [sp.id for sp in effective_specs() if sp.agent == agent]
+    applied, deferred = [], []
+    for sh in shards:
+        if sh in agent_processes and agent_states.get(sh) == "PROCESSING":
+            effort_pending.add(sh)      # same respawn-after-turn path as effort
+            deferred.append(sh)
+        elif sh in agent_processes:
+            await reload_agent(sh)
+            applied.append(sh)
+        else:
+            applied.append(sh)
+    now, src = model_info(agent)
+    return web.json_response({"model": now, "source": src,
                               "applied": applied, "deferred": deferred})
 
 
@@ -4993,6 +5040,7 @@ def create_app(with_lifecycle: bool = True) -> web.Application:
     app.router.add_post("/agents/{name}/register", handle_agent_register)
     app.router.add_post("/agents/{name}/interrupt", handle_agent_interrupt)
     app.router.add_post("/agents/{name}/effort", handle_agent_effort)
+    app.router.add_post("/agents/{name}/model", handle_agent_model)
     app.router.add_post("/agents/{name}/pause", handle_agent_pause)
     app.router.add_post("/agents/{name}/resume", handle_agent_resume)
     app.router.add_post("/agents/{name}/kill", handle_agent_kill)
