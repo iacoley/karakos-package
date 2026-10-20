@@ -70,7 +70,9 @@ def list_snapshots(ws, agent) -> list:
     return sorted(out, key=lambda m: m["id"])
 
 
-def snapshot(ws, agent, reason="manual") -> dict:
+def snapshot(ws, agent, reason="manual", protect=None) -> dict:
+    """Copy the agent aside and prune to KEEP. `protect` (a snapshot id) is never
+    pruned, even when it is the oldest."""
     src = _agent_dir(ws, agent)
     if not src.is_dir():
         raise LookupError(f"no agent directory for {agent!r}")
@@ -89,6 +91,8 @@ def snapshot(ws, agent, reason="manual") -> dict:
     (dest / "meta.json").write_text(json.dumps(meta))
     pruned = []
     for old in list_snapshots(ws, agent)[:-KEEP]:
+        if old["id"] == protect:
+            continue
         shutil.rmtree(root / old["id"], ignore_errors=True)
         pruned.append(old["id"])
     return {"agent": agent, "snapshot_id": sid, "files": len(_files(src)), "pruned": pruned}
@@ -113,7 +117,7 @@ def restore(ws, agent, snapshot_id) -> dict:
     if not snap.is_dir():
         have = [s["id"] for s in list_snapshots(ws, agent)]
         raise LookupError(f"no snapshot {snapshot_id!r} for {agent!r}; available: {have}")
-    before = snapshot(ws, agent, f"before restore of {snapshot_id}")
+    before = snapshot(ws, agent, f"before restore of {snapshot_id}", protect=snapshot_id)
     dest = _agent_dir(ws, agent)
     prompt = dest / PROMPT
     if (snap / PROMPT).is_file():

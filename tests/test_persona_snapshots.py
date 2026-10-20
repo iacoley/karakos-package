@@ -120,3 +120,18 @@ def test_snapshot_and_restore_tools_and_scope(admin, tmp_path, monkeypatch):
 
 def test_tools_are_registered(admin):
     assert {"snapshot_persona", "restore_persona"} <= {t["name"] for t in admin.TOOLS}
+
+
+def test_restoring_the_oldest_of_ten_keeps_it_and_the_agent_intact(tmp_path):
+    d = agent(tmp_path)
+    oldest = ps.snapshot(tmp_path, "a", "oldest")["snapshot_id"]
+    for _ in range(9):
+        ps.snapshot(tmp_path, "a")
+    assert len(ps.list_snapshots(tmp_path, "a")) == 10
+    (d / "SYSTEM_PROMPT.md").write_text("BAD")
+    (d / "persona" / "voice.md").write_text("BAD")
+    r = ps.restore(tmp_path, "a", oldest)
+    assert (d / "SYSTEM_PROMPT.md").read_text() == "P1"
+    assert (d / "persona" / "voice.md").read_text() == "V1"
+    ids = [s["id"] for s in ps.list_snapshots(tmp_path, "a")]
+    assert oldest in ids and r["undo_snapshot"] in ids
