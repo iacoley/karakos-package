@@ -139,3 +139,43 @@ def _post(repo, title, body, token):
             return json.loads(r.read().decode())["html_url"]
     except urlerror.HTTPError as e:
         raise RuntimeError(f"GitHub returned HTTP {e.code}") from e
+
+
+REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+OPTION_FILE, OPTION_NO = "File this issue", "Do not file"
+
+
+def recent(workspace, days=7, limit=30) -> dict:
+    """The newest log rows plus the recurring causes behind them (read-only)."""
+    rows = read_log(workspace, days)
+    return {"days": days, "events": len(rows), "recent": rows[-limit:],
+            "causes": [{k: c[k] for k in ("id", "kind", "tool", "pattern", "count", "days", "last")}
+                       for c in group(rows)]}
+
+
+def propose_issue(workspace, cause, repo, ask, post=None, days=7) -> dict:
+    """Draft the issue for one cause, ask a person through `ask(args)` (the
+    ask_user tool), and file it only on their explicit yes. Never files without
+    the answer; a cause already filed or seen on fewer than MIN_DAYS days is
+    reported, not filed."""
+    if not isinstance(repo, str) or not REPO_RE.match(repo):
+        raise ValueError("repo must look like owner/name")
+    causes = group(read_log(workspace, days))
+    c = next((x for x in causes if x["id"] == cause), None)
+    if c is None:
+        raise LookupError(f"no recurring cause {cause!r} in the last {days} days")
+    try:
+        filed = json.loads((Path(workspace) / "data" / FILED_REL).read_text())
+    except (OSError, ValueError):
+        filed = {}
+    if c["id"] in filed:
+        return {"status": "already_filed", "url": filed[c["id"]]}
+    if c["days"] < MIN_DAYS:
+        return {"status": "too_early", "reason": f"seen on {c['days']} day(s); needs {MIN_DAYS}"}
+    d = draft_issue(c)
+    ans = ask({"question": f"File this issue on {repo}?\n\n{d['title']}\n\n{d['body']}"[:1800],
+               "options": [OPTION_FILE, OPTION_NO], "header": "Friction review"})
+    if ans.get("status") != "answered" or ans.get("answer") != OPTION_FILE:
+        return {"status": "not_filed", "answer": ans.get("answer"), "draft": d}
+    done = file_issues(workspace, [c], repo, approved=True, post=post)
+    return {"status": "filed", "url": done[0]["url"] if done else None, "draft": d}

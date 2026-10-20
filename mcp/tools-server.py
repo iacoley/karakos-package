@@ -359,6 +359,28 @@ CORE_TOOLS = [
         },
     },
     {
+        "name": "friction",
+        "description": (
+            "Friction log review. recent: the newest tool errors, denied tools and "
+            "repeated commands from data/friction-log.jsonl, with the recurring "
+            "causes. propose_issue: draft an upstream issue for one cause and ask "
+            "the user (ask_user) whether to file it; it files only on their yes, "
+            "and only for a cause seen on two separate days."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["recent", "propose_issue"],
+                           "description": "The action to perform"},
+                "days": {"type": "integer", "description": "Look back this many days (default 7)"},
+                "limit": {"type": "integer", "description": "Rows to return (recent; default 30)"},
+                "cause": {"type": "string", "description": "Cause id from recent (propose_issue)"},
+                "repo": {"type": "string", "description": "owner/name to file on (propose_issue)"},
+            },
+            "required": ["action"],
+        },
+    },
+    {
         "name": "vault",
         "description": "Git-backed knowledge vault. Actions: pull (sync from remote), push (sync to remote), status (show git status).",
         "inputSchema": {
@@ -1014,6 +1036,20 @@ def handle_core_tool(tool_name: str, args: dict) -> dict:
                 except json.JSONDecodeError:
                     continue
             return {"messages": messages[-limit:], "channel": channel}
+
+    elif tool_name == "friction":
+        from lib import friction_review as fr
+        action = args.get("action")
+        days = args.get("days") if isinstance(args.get("days"), int) and args["days"] > 0 else 7
+        try:
+            if action == "recent":
+                limit = args.get("limit") if isinstance(args.get("limit"), int) and args["limit"] > 0 else 30
+                return fr.recent(WORKSPACE, days, min(limit, 200))
+            if action == "propose_issue":
+                return fr.propose_issue(WORKSPACE, args.get("cause"), args.get("repo"), ask_user, days=days)
+        except (ValueError, LookupError, RuntimeError) as e:
+            return {"error": str(e)}
+        return {"error": f"Unknown friction action: {action}"}
 
     elif tool_name == "skill":
         from lib import procedure_skills as ps

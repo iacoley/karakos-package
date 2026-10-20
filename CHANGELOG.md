@@ -17,6 +17,7 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - Entity dedup (build B of #238): `bin/graph-dedup.py` lists, and with `--live` merges (at most 50 per run), same-kind entities whose embeddings are nearly identical, using the soft `merge_entities`. The nightly `memory-consolidate` job runs it on Sundays when `MEMORY_ENTITY_DEDUP` is `report` or `live`; off by default. A pair also needs a second signal from the names (identical number tokens and the same number of words, plus a shared word, close spelling or an abbreviation; names with fewer words and ambiguous abbreviations are only listed for review), so dates and version numbers no longer merge; the weekly pass honours `dry_run` and scores in blocks.
+- `friction` action in the tools MCP server (#237): `recent` returns the newest friction rows and recurring causes; `propose_issue` drafts the upstream issue for one cause and files it only after the user answers yes through `ask_user` (and only for a cause seen on two separate days). Nothing is filed automatically.
 
 ## [2.3.1] - 2026-10-21
 
