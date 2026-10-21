@@ -4900,6 +4900,14 @@ async def _shutdown_and_exit(sig):
 # Server Startup
 # =============================================================================
 
+async def drain_all_shards_at_startup():
+    """Drain every shard's queued rows once at boot. Rows queued before a
+    restart have no enqueue event to wake them. drain_shard returns when
+    nothing is claimable, and claim honours not_before, so held rows stay held."""
+    for sid in STATE.shard_ids():
+        turn_loop.spawn(STATE, turn_loop.drain_shard(STATE, sid))
+
+
 async def startup(app):
     """Initialize server on startup"""
     global http_session
@@ -4983,6 +4991,8 @@ async def startup(app):
         held_until = await agent_hold_until(sid)
         if held_until:
             schedule_hold_wake(sid, held_until)
+
+    await drain_all_shards_at_startup()
 
     # Register signal handlers in event loop context
     loop = asyncio.get_running_loop()

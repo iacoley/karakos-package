@@ -147,6 +147,13 @@ class Harness:
         self.module.post_to_discord = self._record_discord
         self.client = TestClient(TestServer(self.module.create_app(), host="127.0.0.1"))
         await self.client.start_server()
+        # Startup drains (drain_all_shards_at_startup) are tasks. Let them
+        # settle before the test body changes a shard's state: a drain that
+        # passed its IDLE check before the change would otherwise claim a row
+        # the test has just queued behind ERROR_RECOVERY.
+        state = getattr(self.module, "STATE", None)
+        if state is not None:
+            await asyncio.gather(*list(state.bg_tasks))
         if os.environ.get("KARAKOS_DB_TRACE"):
             await self._trace_db()
         # The ephemeral port is only known now, after the shards have spawned, so

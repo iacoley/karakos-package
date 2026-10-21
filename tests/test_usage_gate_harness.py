@@ -15,6 +15,7 @@ import pytest
 from conftest import PACKAGE_ROOT
 
 sys.path.insert(0, str(PACKAGE_ROOT / "lib"))
+import token_budget  # noqa: E402
 import usage_gate  # noqa: E402
 
 SHARDS = {"a": ["a", "a-2"]}
@@ -103,6 +104,9 @@ def test_budget_pauses_the_agent_with_hysteresis_and_one_notice(harness, clock):
 
     async def scenario():
         async with h:
+            # Boot drains evaluate the budget and warm the process-wide usage
+            # cache; drop it so the rows written below are what the gate sums.
+            token_budget._cache.clear()
             h.module.RATE_LIMIT_ALERT_CHANNEL_ID = "999"
             for shard in ("a", "a-2"):
                 await sql(h, "INSERT INTO cost_events (agent, cost_delta, session_total,"
@@ -152,6 +156,7 @@ def test_budget_pause_answers_queued_calls(harness, clock):
 
     async def scenario():
         async with h:
+            token_budget._cache.clear()  # see test above: boot warms the usage cache
             await sql(h, "INSERT INTO cost_events (agent, cost_delta, session_total,"
                    " input_tokens, output_tokens) VALUES ('a', 0, 0, 900, 900)")
             await sql(h, "INSERT INTO message_queue (agent, channel, channel_id, server,"
