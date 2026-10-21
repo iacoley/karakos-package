@@ -190,11 +190,14 @@ def test_governor_defers_machine_rows_only(harness, clock):
             rows = {r["content"]: r for r in h.queue_rows("a")}
             assert rows["hb1"]["response"] == "superseded" and rows["hb1"]["processed"] == 4
             assert rows["hb2"]["processed"] == 0
-            # a human message runs, and the queued heartbeat rides along
+            # a human message runs; the queued heartbeat is another channel, so
+            # it is not in that turn and stays deferred
             await h.send("a", "hello")
-            await h.wait_idle("a")
+            await h.wait_for(lambda: any(r["content"] == "hello" and r["processed"] == 2
+                                         for r in h.queue_rows("a")))
             sent = "\n".join(h.sent_to("a"))
-            assert "hello" in sent and "hb2" in sent
+            assert "hello" in sent and "hb2" not in sent
+            assert {r["content"]: r["processed"] for r in h.queue_rows("a")}["hb2"] == 0
             # scheduler is never gated
             await set_week(h, 99)
             await h.poke("a", "scheduler", "remind me")

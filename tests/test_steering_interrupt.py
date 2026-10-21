@@ -88,9 +88,11 @@ def test_interrupt_message_is_claimed_before_queued_rows(harness):
             await asyncio.sleep(0.2)
             await post_interrupt(h, "a", {"message": "urgent", "channel_id": "1"}, shard="a")
             await h.wait_idle("a", timeout=10)
-            # claim_batch puts the priority row first in the batch it builds.
+            # A batch holds one channel: the priority row's turn leaves the
+            # other channel's row for its own turn.
             batch_text = next(t for t in h.sent_to("a") if "urgent" in t)
-            assert batch_text.index("urgent") < batch_text.index("other-channel")
+            assert "other-channel" not in batch_text
+            assert any("other-channel" in t for t in h.sent_to("a"))
             assert row(h, "a", "other-channel")["processed"] == 2
     run(scenario())
 

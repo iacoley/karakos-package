@@ -247,6 +247,60 @@ def test_peek_claimable_is_exactly_what_claim_batch_claims(ags, tmp_path):
     run(go())
 
 
+async def add_chan(db, shard, n, channel_id, is_bot=0, priority=0, created=None, channel="c"):
+    await db.execute(
+        "INSERT INTO message_queue (agent, channel, channel_id, author, is_bot, content,"
+        " message_id, priority, created_at)"
+        " VALUES (?, ?, ?, 'u', ?, 'x', ?, ?, COALESCE(?, CURRENT_TIMESTAMP))",
+        (shard, channel, channel_id, is_bot, f"m{shard}{n}", priority, created))
+    await db.commit()
+
+
+def test_batch_never_mixes_channels(ags):
+    async def go():
+        await ags.init_db()
+        db = ags.db
+        try:
+            await add_chan(db, "s", 1, "A", created="2026-01-01 00:00:01")
+            await add_chan(db, "s", 2, "B", created="2026-01-01 00:00:02")
+            await add_chan(db, "s", 3, "A", created="2026-01-01 00:00:03")
+            peeked = await msgqueue.peek_claimable(db, "s", 20)
+            first = await msgqueue.claim_batch(db, "s", 20)
+            assert [r["message_id"] for r in first] == ["ms1", "ms3"]
+            assert {r["channel_id"] for r in first} == {"A"}
+            assert [r["id"] for r in peeked] == [r["id"] for r in first]
+            peeked = await msgqueue.peek_claimable(db, "s", 20)
+            second = await msgqueue.claim_batch(db, "s", 20)
+            assert [r["message_id"] for r in second] == ["ms2"]
+            assert {r["channel_id"] for r in second} == {"B"}
+            assert [r["id"] for r in peeked] == [r["id"] for r in second]
+            assert await msgqueue.claim_batch(db, "s", 20) == []
+        finally:
+            await db.close()
+    run(go())
+
+
+def test_human_row_in_other_channel_claimed_before_older_heartbeat(ags):
+    async def go():
+        await ags.init_db()
+        db = ags.db
+        try:
+            await add_chan(db, "s", 1, "A", is_bot=1, created="2026-01-01 00:00:01",
+                           channel="signals")
+            await add_chan(db, "s", 2, "B", is_bot=0, created="2026-01-01 00:00:05",
+                           channel="lounge")
+            peeked = await msgqueue.peek_claimable(db, "s", 20)
+            first = await msgqueue.claim_batch(db, "s", 20)
+            assert [r["message_id"] for r in first] == ["ms2"]
+            assert first[0]["channel_id"] == "B"
+            assert [r["id"] for r in peeked] == [r["id"] for r in first]
+            second = await msgqueue.claim_batch(db, "s", 20)
+            assert [r["message_id"] for r in second] == ["ms1"]
+        finally:
+            await db.close()
+    run(go())
+
+
 def test_fail_calls_replies_and_skips_only_call_rows(ags):
     async def go():
         await ags.init_db()

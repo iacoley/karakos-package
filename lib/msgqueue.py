@@ -28,6 +28,16 @@ STATUS_SKIPPED = 4
 INTERNAL_CHANNEL = "handoff"
 
 _ORDER = "priority DESC, created_at ASC, id ASC"
+# Which row heads a batch (and so which channel the batch is for): the same
+# order, except an ordinary automated row (is_bot=1: heartbeat, system poke)
+# yields to a human one of the same priority. Calls and internal rows keep
+# their place. Only the choice of channel changes; rows inside the claimed
+# batch are still _ORDER.
+_HEAD_ORDER = (
+    "priority DESC,"
+    f" CASE WHEN call_id IS NULL AND channel != '{INTERNAL_CHANNEL}'"
+    " AND COALESCE(is_bot, 0) = 1 THEN 1 ELSE 0 END ASC,"
+    " created_at ASC, id ASC")
 # A reply row (call_id set, reply_to_agent NULL) is read by the waiting caller's
 # tool call, never run as a turn (step 2.3).
 _NOT_REPLY = "NOT (call_id IS NOT NULL AND reply_to_agent IS NULL)"
@@ -115,12 +125,16 @@ async def claim_batch(db, shard, limit, now=None) -> list:
     One UPDATE ... RETURNING whose candidates come from a subquery, so a row is
     never in two callers' results. A call row (call_id set) or an internal row
     (channel INTERNAL_CHANNEL) is claimed alone; ordinary rows never share a
-    batch with one.
+    batch with one. An ordinary batch holds rows of one channel_id only (the
+    head row's), so the reply posts where its rows came from; other channels'
+    rows wait for the next turn. The head is the first row by priority, a human
+    row before an automated one, then age (_HEAD_ORDER).
     """
     await expire(db, shard, now)
     heads = await db.execute_fetchall(
-        f"SELECT id, call_id, channel FROM message_queue WHERE agent = ? AND processed = ?"
-        f" AND {_NOT_REPLY} ORDER BY {_ORDER} LIMIT 1", (shard, STATUS_QUEUED))
+        f"SELECT id, call_id, channel, channel_id FROM message_queue"
+        f" WHERE agent = ? AND processed = ?"
+        f" AND {_NOT_REPLY} ORDER BY {_HEAD_ORDER} LIMIT 1", (shard, STATUS_QUEUED))
     head = heads[0] if heads else None
     if head is None:
         return []
@@ -129,8 +143,9 @@ async def claim_batch(db, shard, limit, now=None) -> list:
     else:
         where = (f"id IN (SELECT id FROM message_queue WHERE agent = ?"
                  f" AND processed = ? AND call_id IS NULL"
-                 f" AND channel != '{INTERNAL_CHANNEL}' ORDER BY {_ORDER} LIMIT ?)")
-        args = (shard, STATUS_QUEUED, limit)
+                 f" AND channel != '{INTERNAL_CHANNEL}' AND channel_id IS ?"
+                 f" ORDER BY {_ORDER} LIMIT ?)")
+        args = (shard, STATUS_QUEUED, head["channel_id"], limit)
     rows, _ = await write_commit(
         db,
         "UPDATE message_queue SET processed = ?, claimed_by = ?,"
@@ -207,11 +222,8 @@ async def claim_stolen(db, thief, victim, limit, min_age_s, now=None) -> list:
               "q": STATUS_QUEUED, "ip": STATUS_IN_PROGRESS,
               "now_epoch": int(now_dt.timestamp()),
               "cutoff": _age_cutoff(now_dt, min_age_s)}
-    rows, _ = await write_commit(
-        db,
-        "UPDATE message_queue SET processed = :ip, claimed_by = :thief,"
-        " processing_started_at = CURRENT_TIMESTAMP"
-        " WHERE id IN (SELECT m.id FROM message_queue m"
+    eligible = (
+        " FROM message_queue m"
         "  WHERE m.agent = :victim AND m.processed = :q"
         f"  AND {_stealable('m.')}"
         "  AND m.created_at <= :cutoff"
@@ -222,7 +234,16 @@ async def claim_stolen(db, thief, victim, limit, min_age_s, now=None) -> list:
         "    AND e.channel_id = m.channel_id AND e.processed = :q"
         "    AND (e.created_at < m.created_at"
         "         OR (e.created_at = m.created_at AND e.id < m.id))"
-        f"    AND NOT ({_stealable('e.')} AND e.created_at <= :cutoff))))"
+        f"    AND NOT ({_stealable('e.')} AND e.created_at <= :cutoff))))")
+    # One channel per stolen batch (the reply posts in the batch's channel):
+    # the first takeable row's. The inner SELECT re-uses `eligible` unchanged.
+    rows, _ = await write_commit(
+        db,
+        "UPDATE message_queue SET processed = :ip, claimed_by = :thief,"
+        " processing_started_at = CURRENT_TIMESTAMP"
+        f" WHERE id IN (SELECT m.id{eligible}"
+        "  AND m.channel_id IS (SELECT m.channel_id"
+        f"{eligible} ORDER BY m.created_at ASC, m.id ASC LIMIT 1)"
         "  ORDER BY m.created_at ASC, m.id ASC LIMIT :limit)"
         " AND processed = :q RETURNING *", params, fetch=True)
     return sorted(rows, key=lambda r: (r["created_at"], r["id"]))
@@ -323,9 +344,10 @@ async def peek_claimable(db, shard, limit=20, now=None) -> list:
     live = " AND (expires_at IS NULL OR expires_at >= ?)"
     now = utc_iso(now)
     heads = await db.execute_fetchall(
-        f"SELECT id, call_id, channel FROM message_queue WHERE agent = ? AND processed = ?{live}"
+        f"SELECT id, call_id, channel, channel_id FROM message_queue"
+        f" WHERE agent = ? AND processed = ?{live}"
         f" AND {_NOT_REPLY}"
-        f" ORDER BY {_ORDER} LIMIT 1", (shard, STATUS_QUEUED, now))
+        f" ORDER BY {_HEAD_ORDER} LIMIT 1", (shard, STATUS_QUEUED, now))
     head = heads[0] if heads else None
     if head is None:
         return []
@@ -335,8 +357,8 @@ async def peek_claimable(db, shard, limit=20, now=None) -> list:
     rows = await db.execute_fetchall(
         f"SELECT * FROM message_queue WHERE agent = ? AND processed = ?"
         f" AND call_id IS NULL AND channel != '{INTERNAL_CHANNEL}'{live}"
-        f" AND {_NOT_REPLY} ORDER BY {_ORDER} LIMIT ?",
-        (shard, STATUS_QUEUED, now, limit))
+        f" AND channel_id IS ? AND {_NOT_REPLY} ORDER BY {_ORDER} LIMIT ?",
+        (shard, STATUS_QUEUED, now, head["channel_id"], limit))
     return sorted(rows, key=lambda r: (-(r["priority"] or 0), r["created_at"], r["id"]))
 
 

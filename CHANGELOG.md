@@ -14,6 +14,10 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- A turn's batch now holds rows of one `channel_id` only (`claim_batch`, `peek_claimable` and `claim_stolen` in `lib/msgqueue.py`). Before, a heartbeat row in `signals` and an @mention in `lounge` were claimed into one turn and both got the reply posted in `signals`. Other channels' rows wait for the next turn, in order. A human row (`is_bot=0`) heads the batch ahead of an older automated row (`is_bot=1`) of the same priority. A queued heartbeat in another channel no longer rides along with a human message; it runs as its own turn.
+
 ## [2.3.0] - 2026-10-20
 
 ### Added

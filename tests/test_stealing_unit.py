@@ -158,6 +158,16 @@ def test_ordinary_old_row_claimed_with_keys(ags):
     with_db(ags, body)
 
 
+def test_stolen_batch_holds_one_channel(ags):
+    async def body(db):
+        await add(db, "a1", age=60, channel_id="5")
+        await add(db, "b1", age=50, channel_id="6")
+        await add(db, "a2", age=40, channel_id="5")
+        assert await steal(db) == ["a1", "a2"]
+        assert await steal(db) == ["b1"]
+    with_db(ags, body)
+
+
 @pytest.mark.parametrize("name,kw", [
     ("call", {"call_id": "c1", "reply_to": "b"}),
     ("reply", {"call_id": "c1"}),

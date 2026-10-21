@@ -203,11 +203,9 @@ def test_message_queued_behind_a_busy_turn_gets_typing_in_its_own_channel(ags):
 
 
 def test_batch_spanning_two_channels_stops_typing_for_both(ags):
-    """A drained batch can include messages from more than one channel (no
-    channel filter in the SELECT). Each channel that got a typing indicator
-    at arrival time (via the elif above) must have it stopped when the turn
-    ends, not just the reply channel — otherwise the indicator spins forever
-    in the channel that never gets a reply."""
+    """A batch holds one channel only (claim_batch), so a message waiting in a
+    second channel is not in this turn: its typing indicator is left running
+    for the turn it will get, and the turn's own channel is cleared."""
 
     async def scenario():
         ags.http_session = FakeDiscordREST()
@@ -238,8 +236,15 @@ def test_batch_spanning_two_channels_stops_typing_for_both(ags):
 
         await ags.process_agent_queue("amos")
 
+        # One batch is one channel: A's turn ran and cleared A. B's row is still
+        # queued for its own turn, so its indicator (an honest "a turn is coming")
+        # stays until that turn ends.
         assert CHANNEL_A not in ags.typing_tasks
-        assert CHANNEL_B not in ags.typing_tasks
+        assert CHANNEL_B in ags.typing_tasks
+        async with ags.db.execute(
+            "SELECT processed FROM message_queue WHERE message_id = 'msg-b1'"
+        ) as cur:
+            assert (await cur.fetchone())["processed"] == ags.STATUS_QUEUED
 
     run(ags, scenario)
 
@@ -412,7 +417,14 @@ def test_typing_is_cleared_for_every_batch_channel_when_the_turn_raises(ags):
         with pytest.raises(RuntimeError):
             await ags.process_agent_queue("amos")
 
+        # One batch is one channel: A's turn ran and cleared A. B's row is still
+        # queued for its own turn, so its indicator (an honest "a turn is coming")
+        # stays until that turn ends.
         assert CHANNEL_A not in ags.typing_tasks
-        assert CHANNEL_B not in ags.typing_tasks
+        assert CHANNEL_B in ags.typing_tasks
+        async with ags.db.execute(
+            "SELECT processed FROM message_queue WHERE message_id = 'msg-b1'"
+        ) as cur:
+            assert (await cur.fetchone())["processed"] == ags.STATUS_QUEUED
 
     run(ags, scenario)
