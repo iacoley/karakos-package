@@ -75,3 +75,60 @@ def test_resolve_rejects_missing_empty_big_and_many(root):
         ob.resolve_attachments(["b"], root, max_bytes=3)
     with pytest.raises(ob.AttachmentError, match="too many"):
         ob.resolve_attachments(["b", "b"], root, max_count=1)
+
+
+# --- delivery: bin/agent-server.py ---------------------------------------------
+import asyncio  # noqa: E402
+
+from test_outbox_send import FakeDiscord, ags, rows  # noqa: E402,F401
+
+
+def _row_with(ags, root, names, content="here"):
+    paths = []
+    for n in names:
+        f = root / n
+        f.write_bytes(b"data-" + n.encode())
+        paths.append(str(f))
+    conn = ags._outbox_store()
+    rid, _ = ob.enqueue(conn, "amos", "123", content, claimed=True, now=1_000_000.0,
+                        chunks_total=1, attachments=paths)
+    return rid, ob.get(conn, rid)
+
+
+def test_send_row_posts_multipart_with_files(ags, tmp_path):
+    root = tmp_path / "data"
+    root.mkdir(exist_ok=True)
+    fake = FakeDiscord()
+    seen = {}
+    orig = fake.post
+
+    def post(url, **kw):
+        seen.update(kw)
+        return orig(url, **kw)
+    fake.post = post
+    ags.http_session = fake
+    rid, row = _row_with(ags, root, ["a.mp3"])
+    assert asyncio.run(ags.outbox_send_row(row)) == "msg-1"
+    assert "json" not in seen and seen["data"] is not None
+    assert "Content-Type" not in seen["headers"]
+    assert rows(ags)[0]["status"] == "delivered"
+
+
+def test_send_row_missing_file_is_permanent(ags, tmp_path):
+    root = tmp_path / "data"
+    root.mkdir(exist_ok=True)
+    ags.http_session = FakeDiscord()
+    rid, row = _row_with(ags, root, ["a.mp3"])
+    (root / "a.mp3").unlink()
+    assert asyncio.run(ags.outbox_send_row(row)) is None
+    assert ags.http_session.calls == 0
+    assert rows(ags)[0]["status"] == "dead"
+
+
+def test_send_row_without_attachments_still_json(ags):
+    fake = FakeDiscord()
+    ags.http_session = fake
+    conn = ags._outbox_store()
+    rid, _ = ob.enqueue(conn, "amos", "123", "plain", claimed=True, now=1_000_000.0, chunks_total=1)
+    assert asyncio.run(ags.outbox_send_row(ob.get(conn, rid))) == "msg-1"
+    assert fake.bodies[0]["content"] == "plain"

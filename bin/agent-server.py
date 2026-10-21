@@ -1829,6 +1829,21 @@ def _discord_error_detail(status: Optional[int], body: str) -> str:
     return out
 
 
+def _attachment_form(payload: Dict[str, Any], paths: List[str]) -> "aiohttp.FormData":
+    """Multipart body for a message with files: `payload_json` plus `files[n]`.
+
+    Files are read when the request is built, so a retry re-reads them; a path
+    that has gone missing raises FileNotFoundError (the sender treats that as
+    permanent).
+    """
+    form = aiohttp.FormData()
+    form.add_field("payload_json", json.dumps(payload), content_type="application/json")
+    for n, path in enumerate(paths):
+        form.add_field(f"files[{n}]", Path(path).read_bytes(),
+                       filename=Path(path).name, content_type="application/octet-stream")
+    return form
+
+
 async def outbox_send_row(row: Dict[str, Any]) -> Optional[str]:
     """Send one claimed (`sending`) outbox row, from `chunks_done` onward.
 
@@ -1872,7 +1887,23 @@ async def outbox_send_row(row: Dict[str, Any]) -> Optional[str]:
         retry_after = None
         detail = ""
         try:
-            async with http_session.post(url, headers=headers, json=payload) as resp:
+            request_kwargs: Dict[str, Any] = {"json": payload}
+            files = json.loads(row.get("attachments") or "[]") if idx == 0 else []
+            if files:
+                payload["attachments"] = [{"id": n, "filename": Path(f).name}
+                                          for n, f in enumerate(files)]
+                try:
+                    form = _attachment_form(payload, files)
+                except OSError as e:
+                    log.error(f"Discord outbox: attachment unreadable for {rid}: {e}")
+                    outbox_lib.record_failure(conn, rid, "permanent", None,
+                                              f"attachment unreadable: {type(e).__name__}",
+                                              None, _outbox_now())
+                    return None
+                # multipart sets its own Content-Type (with the boundary)
+                headers = {"Authorization": headers["Authorization"]}
+                request_kwargs = {"data": form}
+            async with http_session.post(url, headers=headers, **request_kwargs) as resp:
                 status = resp.status
                 if status in (200, 201):
                     data = await resp.json()
