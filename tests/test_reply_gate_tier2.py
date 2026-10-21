@@ -13,7 +13,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).parent.parent / "lib"))
 from test_relay_reply_gate import (  # noqa: E402,F401
-    AMOS_BOT_ID, CHANNELS, FOREIGN_BOT_ID, GATED_CHANNEL, LAUREN, MIKE,
+    AMOS_BOT_ID, CHANNELS, FOREIGN_BOT_ID, GATED_CHANNEL, ALEX, MIKE,
     FakeMessage, adapter, mention_amos, relay,
 )
 import reply_classifier as rc  # noqa: E402
@@ -106,7 +106,7 @@ def test_kill_switch(t2, monkeypatch):
 
 
 def test_tier1_never_reaches_runner(t2):
-    say(t2, "can you grab it?", replied_to=LAUREN)           # tier-1 silent
+    say(t2, "can you grab it?", replied_to=ALEX)           # tier-1 silent
     say(t2, "amos, add milk")                                  # tier-1 engage
     assert not t2.runner.prompts
     assert t2.routed == [("amos", "amos, add milk")]
@@ -133,7 +133,7 @@ def test_empty_message_never_reaches_runner(t2):
 
 
 def test_context_excludes_current_includes_agent_posts(t2):
-    say(t2, "first thing", who=LAUREN)
+    say(t2, "first thing", who=ALEX)
     t2.runner.text = "SILENT 0.9"
     # an agent post arrives through the own-message branch
     own = FakeMessage(AMOS_BOT_ID, "I put it on the list", bot=True)
@@ -181,7 +181,7 @@ def test_same_channel_calls_run_one_at_a_time(t2):
     async def go():
         await asyncio.gather(
             t2.on_message(FakeMessage(MIKE, "first question?")),
-            t2.on_message(FakeMessage(LAUREN, "second question?")))
+            t2.on_message(FakeMessage(ALEX, "second question?")))
     asyncio.run(go())
     assert len(t2.runner.prompts) == 2 and t2.runner.max_active == 1
 

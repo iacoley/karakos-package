@@ -59,7 +59,7 @@ AMOS_BOT_ID = 111
 KOTHAR_BOT_ID = 222
 FOREIGN_BOT_ID = 999
 MIKE = 1
-LAUREN = 2
+ALEX = 2
 
 GATED_CHANNEL = 5000
 PLAIN_CHANNEL = 6000
@@ -199,7 +199,7 @@ def mention_amos():
 def test_two_humans_talking_are_left_alone(adapter):
     """THE acceptance test: two humans converse with no mention of the bot."""
     deliver(adapter, FakeMessage(MIKE, "did you feed the cat"))
-    deliver(adapter, FakeMessage(LAUREN, "yeah this morning"))
+    deliver(adapter, FakeMessage(ALEX, "yeah this morning"))
     assert adapter.routed == []
 
 
@@ -227,7 +227,7 @@ def test_reply_to_the_agent_engages(adapter):
 
 
 def test_reply_to_another_human_is_the_clearest_not_for_me(adapter):
-    deliver(adapter, FakeMessage(MIKE, "can you grab it?", replied_to=LAUREN))
+    deliver(adapter, FakeMessage(MIKE, "can you grab it?", replied_to=ALEX))
     assert adapter.routed == []
 
 

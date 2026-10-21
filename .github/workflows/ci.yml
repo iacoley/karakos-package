@@ -215,6 +215,23 @@ jobs:
       - name: Run preflight test suite
         run: pytest tests/test_preflight.py -v -m "not slow" --tb=short
 
+  # Household denylist (rules live outside the repo; see README "Public-safety
+  # check") plus a secret scan of the working tree.
+  public-safety:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Household denylist
+        env:
+          PII_RULES_JSON: ${{ secrets.PII_RULES_JSON }}
+        run: |
+          if [ -z "$PII_RULES_JSON" ]; then echo "::notice::PII_RULES_JSON secret not set; denylist skipped"; exit 0; fi
+          printf '%s' "$PII_RULES_JSON" > "$RUNNER_TEMP/pii_rules.json"
+          python3 bin/verify-public-safety.py --all --require-rules --rules "$RUNNER_TEMP/pii_rules.json"
+      - name: gitleaks (working tree)
+        run: |
+          docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.18.4 detect --source /repo --no-git --redact --config /repo/.gitleaks.toml
+
   # Docker Compose validation
   compose-check:
     runs-on: ubuntu-latest

@@ -1,0 +1,8 @@
+# Paths or path:kind pairs exempt from bin/verify-public-safety.py
+LICENSE
+CHANGELOG.md:name
+# a colour name here, not a person
+dashboard/app/components/lamplight-ui.tsx:name
+# historical audit notes naming the maintainer and his public site
+docs/TEST_RESULTS.md:name
+docs/production-grade-plan.md:domain

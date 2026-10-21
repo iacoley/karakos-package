@@ -260,6 +260,25 @@ A Raspberry Pi 4 or 5, a mini PC, or a small VM all work.
 
 ---
 
+## Public-safety check
+
+`bin/verify-public-safety.py` scans for household PII (names, addresses, IPs and
+the like) using a rules file that lives outside the repo, so the denylist is never
+published. It prints only `path:line: kind (rule section[index])`, never the match.
+Enable the pre-commit hook once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+The rules file is the first of: `--rules PATH`, the `KARAKOS_PII_RULES` environment
+variable, then `~/.karakos/secrets/pii_rules.json`. With no rules file the check
+prints a notice and passes; `--require-rules` makes that an error (exit 2). Paths
+exempt from the check go in `.public-safety-allow` (`GLOB` or `GLOB:KIND`). CI runs
+the same check when the `PII_RULES_JSON` secret is set, plus gitleaks.
+
+---
+
 ## License
 
 MIT. Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).

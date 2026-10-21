@@ -32,7 +32,7 @@ def relay(tmp_path):
     return mod
 
 
-def _msg(content="hi", author="Lauren", attachments=()):
+def _msg(content="hi", author="Alex", attachments=()):
     return SimpleNamespace(content=content, author=SimpleNamespace(display_name=author),
                            attachments=list(attachments))
 

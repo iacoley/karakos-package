@@ -42,18 +42,18 @@ def _check(v):
 
 def test_direct_question_by_name_engages():
     _need_cli()
-    v = _check(_ask([("lauren", "morning")], ("mike", "amos, what's on the calendar today?")))
+    v = _check(_ask([("alex", "morning")], ("mike", "amos, what's on the calendar today?")))
     assert v.engage, v
 
 
 def test_people_arranging_lunch_stay_silent():
     _need_cli()
-    v = _check(_ask([("lauren", "are you free for lunch?")],
+    v = _check(_ask([("alex", "are you free for lunch?")],
                     ("mike", "yeah, noon works. should I pick you up?")))
     assert not v.engage, v
 
 
 def test_ambiguous_room_question_parses():
     _need_cli()
-    _check(_ask([("lauren", "ugh, it smells like smoke")],
+    _check(_ask([("alex", "ugh, it smells like smoke")],
                 ("mike", "does anyone know if the oven is on?")))
