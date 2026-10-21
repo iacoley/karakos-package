@@ -14,6 +14,8 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.3.1] - 2026-10-21
+
 ### Fixed
 
 - Rate-limit utilization was scaled twice. `parse_event` stores a percent, and the readers (`weekly_utilization` in `lib/rate_limits.py`, `usage_report` in `lib/usage_gate.py`) ran `normalize_pct` on it again, so a real 1% weekly reading (stored `1.0`) read as 100%. The governor then deferred every heartbeat. Readers now use `stored_pct`, which never rescales. `normalize_pct` is unchanged and still applies to the CLI's fraction in `parse_event`.
@@ -262,7 +264,8 @@ Initial release: an installable multi-agent household system — Discord
 integration, local dashboard, episodic memory, session persistence, cost
 tracking, and builder/reviewer agents behind guardrails.
 
-[Unreleased]: https://github.com/mcarmody/karakos-package/compare/v2.3.0...develop
+[Unreleased]: https://github.com/mcarmody/karakos-package/compare/v2.3.1...develop
+[2.3.1]: https://github.com/mcarmody/karakos-package/compare/v2.3.0...v2.3.1
 [2.3.0]: https://github.com/mcarmody/karakos-package/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/mcarmody/karakos-package/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/mcarmody/karakos-package/compare/v2.0.2...v2.1.0
