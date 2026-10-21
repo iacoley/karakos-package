@@ -16,6 +16,7 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Rate-limit utilization was scaled twice. `parse_event` stores a percent, and the readers (`weekly_utilization` in `lib/rate_limits.py`, `usage_report` in `lib/usage_gate.py`) ran `normalize_pct` on it again, so a real 1% weekly reading (stored `1.0`) read as 100%. The governor then deferred every heartbeat. Readers now use `stored_pct`, which never rescales. `normalize_pct` is unchanged and still applies to the CLI's fraction in `parse_event`.
 - A turn's batch now holds rows of one `channel_id` only (`claim_batch`, `peek_claimable` and `claim_stolen` in `lib/msgqueue.py`). Before, a heartbeat row in `signals` and an @mention in `lounge` were claimed into one turn and both got the reply posted in `signals`. Other channels' rows wait for the next turn, in order. A human row (`is_bot=0`) heads the batch ahead of an older automated row (`is_bot=1`) of the same priority. A queued heartbeat in another channel no longer rides along with a human message; it runs as its own turn.
 - Rows queued before an agent-server restart are drained at startup. Previously they waited until a new row arrived for that agent, since the enqueue path was the only routine trigger for a drain. `drain_all_shards_at_startup()` in `bin/agent-server.py` spawns one drain per shard after the usage-wall hold timers are re-armed; held rows stay held. (Seen on v2.3.0: a queued heartbeat sat unprocessed after the upgrade.) Touches tier-1 `bin/agent-server.py`: maintainer review.
 

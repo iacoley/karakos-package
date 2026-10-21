@@ -305,7 +305,7 @@ async def usage_report(state) -> dict:
     windows = {}
     for r in rows:
         t = r["rate_limit_type"]
-        pct = rate_limits.normalize_pct(r["utilization"])
+        pct = rate_limits.stored_pct(r["utilization"])
         windows[t] = {
             "status": r["status"], "resets_at": r["resets_at"],
             "utilization_pct": pct,

@@ -79,6 +79,15 @@ def normalize_pct(utilization) -> Optional[float]:
     return n * 100.0 if n <= 1 else n
 
 
+def stored_pct(utilization) -> Optional[float]:
+    """A `rate_limit_state.utilization` value. parse_event already stored it as
+    a percent (0..100), so it is never scaled again; anything else is None."""
+    n = _num(utilization)
+    if n is None or n < 0 or n > 100:
+        return None
+    return float(n)
+
+
 def _type_name(v) -> str:
     return v.strip() if isinstance(v, str) and v.strip() else UNKNOWN_TYPE
 
@@ -207,5 +216,5 @@ def weekly_utilization(rows, now) -> Optional[float]:
         reset = parse_resets_at(_field(r, "resets_at"))
         if reset is None or reset <= now:
             return None
-        return normalize_pct(_field(r, "utilization"))
+        return stored_pct(_field(r, "utilization"))
     return None

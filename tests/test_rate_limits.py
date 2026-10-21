@@ -105,8 +105,10 @@ def test_warning_never_pauses_and_latest_pause_wins():
 
 def test_utilization_reads():
     f = lambda **k: rl.weekly_utilization([row("seven_day", resets=NOW + 10, **k)], NOW)
-    assert f(utilization=0.73) == 73.0
+    # stored values are already percents: never scaled again
+    assert f(utilization=0.73) == 0.73
     assert f(utilization=73) == 73.0
+    assert f(utilization=1.0) == 1.0 and f(utilization=0.5) == 0.5
     assert f(utilization=-1) is None and f(utilization="x") is None
     rolled = [row("seven_day", resets=NOW - 1, utilization=0.9)]
     assert rl.weekly_utilization(rolled, NOW) is None
@@ -153,3 +155,30 @@ def test_window_only_update_keeps_status_and_events_do_not_cross(tmp_path):
     rows = with_db(tmp_path, go)
     assert rl.breaker_state(
         [r for r in rows], NOW).paused
+
+
+def test_weekly_utilization_one_percent_reads_as_one_percent():
+    # parse_event stores 0.01 as 1.0; the reader must not scale it to 100
+    rows = [row("seven_day", resets=NOW + 10, utilization=1.0)]
+    assert rl.weekly_utilization(rows, NOW) == 1.0
+
+
+def test_weekly_utilization_half_percent_reads_as_stored():
+    rows = [row("seven_day", resets=NOW + 10, utilization=0.5)]
+    assert rl.weekly_utilization(rows, NOW) == 0.5
+
+
+@pytest.mark.parametrize("v,want", [
+    (1.0, 1.0), (0.5, 0.5), (0, 0.0), (73, 73.0), (100, 100.0),
+    (-1, None), (101, None), ("x", None), (None, None), (True, None)])
+def test_stored_pct_never_rescales(v, want):
+    assert rl.stored_pct(v) == want
+
+
+def test_round_trip_one_percent_weekly(tmp_path):
+    info = {"unifiedWindows": {"seven_day": {"utilization": 0.01, "resetsAt": NOW + 3600}}}
+
+    async def go(db):
+        await rl.upsert_windows(db, rl.parse_event(info, NOW), NOW)
+        return rl.weekly_utilization(list((await read(db)).values()), NOW)
+    assert with_db(tmp_path, go) == 1.0
