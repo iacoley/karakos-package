@@ -132,3 +132,47 @@ def test_send_row_without_attachments_still_json(ags):
     rid, _ = ob.enqueue(conn, "amos", "123", "plain", claimed=True, now=1_000_000.0, chunks_total=1)
     assert asyncio.run(ags.outbox_send_row(ob.get(conn, rid))) == "msg-1"
     assert fake.bodies[0]["content"] == "plain"
+
+
+# --- reply markers ------------------------------------------------------------
+
+def test_extract_attachments_strips_markers(root):
+    f = root / "a.mp3"
+    f.write_bytes(b"x")
+    clean, paths, notes = ob.extract_attachments(
+        "Here you go\n[[attach: a.mp3]]\n", root)
+    assert clean == "Here you go" and paths == [str(f.resolve())] and notes == []
+
+
+def test_extract_attachments_reports_refusals(root, tmp_path):
+    (tmp_path / "s.txt").write_text("s")
+    clean, paths, notes = ob.extract_attachments("hi\n[[attach: ../s.txt]]", root)
+    assert clean == "hi" and paths == [] and "outside" in notes[0]
+
+
+def test_extract_ignores_inline_mentions(root):
+    clean, paths, notes = ob.extract_attachments("use the [[attach: x]] marker like so", root)
+    assert paths == [] and notes == [] and "[[attach: x]]" in clean
+
+
+def test_post_to_discord_queues_attachments(ags, tmp_path):
+    root = tmp_path / "data"
+    root.mkdir(exist_ok=True)
+    (root / "a.mp3").write_bytes(b"x")
+    fake = FakeDiscord()
+    ags.http_session = fake
+    out = asyncio.run(ags.post_to_discord("amos", "123", "listen\n[[attach: a.mp3]]",
+                                          dead_letter=True))
+    assert out == "msg-1"
+    row = rows(ags)[0]
+    assert json.loads(row["attachments"]) == [str((root / "a.mp3").resolve())]
+    assert "[[attach" not in row["content"]
+
+
+def test_post_to_discord_attachment_only_reply_has_text(ags, tmp_path):
+    root = tmp_path / "data"
+    root.mkdir(exist_ok=True)
+    (root / "a.mp3").write_bytes(b"x")
+    ags.http_session = FakeDiscord()
+    out = asyncio.run(ags.post_to_discord("amos", "123", "[[attach: a.mp3]]", dead_letter=True))
+    assert out == "msg-1" and rows(ags)[0]["content"] == "Attached: a.mp3"

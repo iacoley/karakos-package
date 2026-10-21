@@ -1829,6 +1829,10 @@ def _discord_error_detail(status: Optional[int], body: str) -> str:
     return out
 
 
+MAX_OUTBOUND_ATTACHMENT_BYTES = int(os.environ.get("MAX_ATTACHMENT_BYTES", str(25 * 1024 * 1024)))
+MAX_OUTBOUND_ATTACHMENTS = int(os.environ.get("MAX_ATTACHMENTS_PER_MESSAGE", "10"))
+
+
 def _attachment_form(payload: Dict[str, Any], paths: List[str]) -> "aiohttp.FormData":
     """Multipart body for a message with files: `payload_json` plus `files[n]`.
 
@@ -2143,6 +2147,20 @@ async def post_to_discord(agent: str, channel_id: str, content: str,
     if channel_id == "0":
         return None
 
+    # `[[attach: path]]` lines become file attachments on durable replies only.
+    attachments: List[str] = []
+    if dead_letter and "[[attach:" in (content or ""):
+        content, attachments, notes = outbox_lib.extract_attachments(
+            content, WORKSPACE_ROOT / "data", MAX_OUTBOUND_ATTACHMENT_BYTES,
+            MAX_OUTBOUND_ATTACHMENTS)
+        for note in notes:
+            log.warning(f"outbound attachment refused agent={agent}: {note}")
+        if notes:
+            content = (content + "\n\n" if content else "") + "\n".join(
+                f"(attachment not sent: {n})" for n in notes)
+        if attachments and not content.strip():
+            content = "Attached: " + ", ".join(Path(a).name for a in attachments)
+
     # Get agent's Discord token, fallback to primary agent
     token = AGENT_TOKENS.get(agent)
     prefix = ""
@@ -2181,7 +2199,8 @@ async def post_to_discord(agent: str, channel_id: str, content: str,
                     claimed=True,
                     now=_outbox_now(), content_sha=outbox_lib.content_sha(content),
                     chunks_total=len(chunks),
-                    queue_message_id=queue_message_id)
+                    queue_message_id=queue_message_id,
+                    attachments=attachments)
             except Exception as e:
                 _outbox_broken("enqueue", e)
             else:

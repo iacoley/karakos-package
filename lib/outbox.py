@@ -19,6 +19,7 @@ import hashlib
 import json
 import os
 import random
+import re
 import sqlite3
 import sys
 import time
@@ -148,6 +149,36 @@ def resolve_attachments(paths, root, max_bytes=25 * 1024 * 1024, max_count=10):
             raise AttachmentError(f"attachment too large ({size} > {max_bytes}): {raw}")
         out.append(str(p))
     return out
+
+
+_ATTACH_RE = re.compile(r"^[ \t]*\[\[attach:\s*(.+?)\s*\]\][ \t]*$", re.MULTILINE)
+
+
+def extract_attachments(text, root, max_bytes=25 * 1024 * 1024, max_count=10):
+    """Pull `[[attach: path]]` lines out of a reply.
+
+    Returns (clean_text, paths, notes). Valid files come back as resolved paths;
+    a refused marker is dropped from the text and explained in `notes`, so the
+    reply still goes out and the author can see why a file did not.
+    """
+    paths, notes = [], []
+
+    def take(m):
+        raw = m.group(1)
+        try:
+            ok = resolve_attachments([raw], root, max_bytes, 1)
+        except AttachmentError as e:
+            notes.append(str(e))
+            return ""
+        if len(paths) >= max_count:
+            notes.append(f"too many attachments (max {max_count}): {raw}")
+            return ""
+        paths.append(ok[0])
+        return ""
+
+    clean = _ATTACH_RE.sub(take, text or "")
+    clean = re.sub(r"\n{3,}", "\n\n", clean).strip()
+    return clean, paths, notes
 
 
 def backoff_s(attempts: int, jitter: bool = True) -> float:

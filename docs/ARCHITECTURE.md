@@ -664,6 +664,11 @@ Hard delete is not an agent action. `taskboard.delete` tombstones a task with
   /outbox/{id}/retry` and `POST /outbox/{id}/discard` with it up. `GET /health`
   carries `outbox` (`pending`, `sending`, `dead`, `oldest_pending_age_s`);
   `dead_letters` counts dead rows and `dead_letter_path` is deprecated.
+  A durable reply can carry files: a line `[[attach: path]]` is stripped from the
+  text and the file is sent with the first chunk as multipart (`attachments` column,
+  `lib/outbox.py` `resolve_attachments`). Only files inside `data/` qualify, capped by
+  `MAX_ATTACHMENT_BYTES` and `MAX_ATTACHMENTS_PER_MESSAGE`; a refused file is named in
+  the reply and a file that vanishes before sending makes the row `dead`.
 - **Discord switches** (all off by default; `threads`, `reaction_notices`,
   `edit_reroute`, `suppress_embeds`; `tool_streaming` is a per-channel override of
   the agent's setting): [DISCORD_SETUP.md](DISCORD_SETUP.md#optional-behaviours).
