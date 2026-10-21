@@ -173,6 +173,18 @@ either: a shard that owns the channel still does not answer an unmentioned
 message. A channel that sets both `mention_only` and `reply_gate` logs an error
 at load and is treated as `mention_only`.
 
+**`unlisted_channels`** — a top-level key in `channels.json` for channels that are
+not listed in it. `"ignore"` (the default, also used when the key is absent) never
+routes an unlisted channel, even on an @mention. `"mention_only"` makes an unlisted
+channel behave like `mention_only: true`: an @mention of an agent routes, a plain
+message does not. It applies only inside the servers named in `server_id` /
+`server_ids`, and a foreign bot is still refused (there is no `guest_agents` for an
+unlisted channel). Any other value logs an error at load and acts as `"ignore"`.
+
+```json
+{ "server_id": "...", "unlisted_channels": "mention_only", "channels": { } }
+```
+
 Role mentions need one extra key per agent, naming the environment variable that
 holds the role's id (right-click the role in Discord with developer mode on, then
 Copy Role ID). In `config/agents.yaml`:

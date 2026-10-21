@@ -645,6 +645,10 @@ def load_config():
             log.error(f"channel '{name}' sets both mention_only and reply_gate; "
                       f"treating it as mention_only (reply_gate ignored)")
 
+    unlisted = channels_config.get("unlisted_channels")
+    if unlisted is not None and unlisted not in ("ignore", "mention_only"):
+        log.error("unlisted_channels=%r is not supported (ignore, mention_only); using ignore", unlisted)
+
     _config_state["mtimes"] = _config_mtimes()
     log.info(f"Loaded config for {len(agent_config)} agents, {len(channels_config.get('channels', {}))} channels")
 
@@ -724,6 +728,10 @@ def default_agent_for(channel_name) -> Optional[str]:
         return None
     shard = registry_obj.shard_for_channel(channel_name)
     return shard.agent if shard else None
+
+
+def unlisted_mentions_enabled() -> bool:
+    return (channels_config or {}).get("unlisted_channels") == "mention_only"
 
 
 def load_server_ids(config: Dict) -> set:
@@ -1037,8 +1045,10 @@ class DiscordAdapter(discord.Client):
                     )
                     return
 
-        # B24: a mention only routes in a channel listed in channels.json.
-        if channel_name is None:
+        # B24: an unlisted channel never routes, unless channels.json sets
+        # "unlisted_channels": "mention_only", in which case an @mention does.
+        unlisted_mentions = channel_name is None and unlisted_mentions_enabled()
+        if channel_name is None and not (unlisted_mentions and target_agent):
             if target_agent:
                 log.info(f"route channel={message.channel.id} unlisted, mention ignored")
             return
@@ -1048,6 +1058,7 @@ class DiscordAdapter(discord.Client):
             channel_opt_out=channel_config.get("route") is False,
             parent_channel_name=parent_name,
             mention_only=mention_only,
+            unlisted_mentions=unlisted_mentions,
         ) if registry_obj is not None else None
         if route is None:
             return  # No routing

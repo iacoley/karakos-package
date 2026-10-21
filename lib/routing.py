@@ -3,6 +3,10 @@
 Pure and stdlib only. The relay supplies the registry, the channel's name
 (None when the channel is not in channels.json), the mentioned agent id (if
 any) and whether the author is a bot; this module decides.
+
+A channel not in channels.json never routes (B24), unless the caller passes
+`unlisted_mentions=True` (channels.json `"unlisted_channels": "mention_only"`):
+then an @mention of a known agent routes there and nothing else does.
 """
 from dataclasses import dataclass
 from typing import Optional
@@ -12,12 +16,12 @@ from typing import Optional
 class Route:
     shard: str
     agent: str
-    reason: str  # "mention" | "channel" | "primary_fallback"
+    reason: str  # "mention" | "channel" | "primary_fallback" | "mention_unlisted"
 
 
 def route_message(registry, channel_name, mentioned_agent, is_bot,
                   channel_opt_out=False, parent_channel_name=None,
-                  mention_only=False) -> Optional[Route]:
+                  mention_only=False, unlisted_mentions=False) -> Optional[Route]:
     """Decide which shard, if any, receives a message.
 
     `mention_only` (a channel's `"mention_only": true`) routes on an explicit
@@ -31,6 +35,11 @@ def route_message(registry, channel_name, mentioned_agent, is_bot,
     if channel_name is None:
         channel_name = parent_channel_name
     if channel_name is None:
+        # Opt-in: an unlisted channel answers an @mention of a known agent.
+        if unlisted_mentions and mentioned_agent and mentioned_agent in registry.ids():
+            theirs = registry.shards_of(mentioned_agent)
+            if theirs:
+                return Route(theirs[0].id, theirs[0].agent, "mention_unlisted")
         return None
 
     # 2. A mention of a known agent.
