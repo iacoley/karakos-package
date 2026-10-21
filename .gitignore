@@ -61,3 +61,29 @@ overlay/
 # Composed prompts (debug aid, never the source)
 agents/*/SYSTEM_PROMPT.generated.md
 agents/*/shards/*.generated.md
+
+# --- Instance state: default-deny (HELCARAXË Phase 0) ---
+# Household/instance files never belong in the public engine.
+/config/*
+!/config/*.example
+!/config/*.example.*
+/data/*
+!/data/*.example
+!/data/*.example.*
+/memory/
+/state/
+/secrets/
+*.secret
+*.secrets.json
+pii_rules.json
+# already tracked, kept
+!/config/.env.template
+!/config/claude-settings.json
+!/config/docker-compose.dev.yml
+!/config/docker-compose.yml
+!/config/governor.yaml
+!/config/hooks.json
+!/config/models.yaml
+!/config/protected-paths.json
+!/config/recall-source.example
+!/config/supervisord.conf
