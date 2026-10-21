@@ -92,6 +92,7 @@ def open_store(path) -> sqlite3.Connection:
     conn.execute("PRAGMA busy_timeout=5000")
     conn.executescript(SCHEMA)
     ensure_column(conn, "outbox", "queue_message_id", "TEXT")
+    ensure_column(conn, "outbox", "attachments", "TEXT DEFAULT '[]'")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_outbox_qmid ON outbox(queue_message_id)")
     conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
     try:
@@ -116,6 +117,38 @@ def _row(r):
 
 
 # --- policy ------------------------------------------------------------------
+
+class AttachmentError(ValueError):
+    """An outbound attachment was refused (outside the root, missing, too big)."""
+
+
+def resolve_attachments(paths, root, max_bytes=25 * 1024 * 1024, max_count=10):
+    """Validate outbound attachment paths; return their resolved absolute paths.
+
+    Every path must resolve (symlinks followed) to a regular file inside `root`,
+    be non-empty and no larger than `max_bytes`; at most `max_count` files.
+    Raises AttachmentError on the first problem so nothing is half-queued.
+    """
+    paths = list(paths or [])
+    if len(paths) > max_count:
+        raise AttachmentError(f"too many attachments ({len(paths)} > {max_count})")
+    base = Path(root).resolve()
+    out = []
+    for raw in paths:
+        p = Path(raw)
+        p = (p if p.is_absolute() else base / p).resolve()
+        if base != p and base not in p.parents:
+            raise AttachmentError(f"attachment outside {base}: {raw}")
+        if not p.is_file():
+            raise AttachmentError(f"attachment is not a file: {raw}")
+        size = p.stat().st_size
+        if size == 0:
+            raise AttachmentError(f"attachment is empty: {raw}")
+        if size > max_bytes:
+            raise AttachmentError(f"attachment too large ({size} > {max_bytes}): {raw}")
+        out.append(str(p))
+    return out
+
 
 def backoff_s(attempts: int, jitter: bool = True) -> float:
     base = min(BACKOFF_CAP_S, 5 * 3 ** (max(1, min(attempts, 20)) - 1))
@@ -142,9 +175,12 @@ def _older_active(conn, agent, channel_id):
 
 
 def enqueue(conn, agent, channel_id, content, reply_to=None, flags=0, claimed=False,
-            now=None, content_sha=None, chunks_total=None, queue_message_id=None):
+            now=None, content_sha=None, chunks_total=None, queue_message_id=None,
+            attachments=None):
     """Insert a row. `claimed` (inline owner) is honoured only when no older
-    pending/sending row exists for (agent, channel). Returns (id, claimed)."""
+    pending/sending row exists for (agent, channel). `attachments` is a list of
+    already-validated file paths (see `resolve_attachments`), sent with the
+    first chunk. Returns (id, claimed)."""
     now = _now(now)
     rid = "ob-" + uuid.uuid4().hex[:12]
     sha = content_sha or globals()["content_sha"](content)
@@ -153,10 +189,12 @@ def enqueue(conn, agent, channel_id, content, reply_to=None, flags=0, claimed=Fa
         claimed = bool(claimed) and not _older_active(conn, agent, channel_id)
         conn.execute(
             "INSERT INTO outbox(id, created_at, updated_at, agent, channel_id, reply_to, content,"
-            " flags, status, chunks_total, next_attempt_at, content_sha, queue_message_id)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " flags, status, chunks_total, next_attempt_at, content_sha, queue_message_id,"
+            " attachments)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (rid, now, now, agent, str(channel_id), reply_to, content, flags,
-             "sending" if claimed else "pending", chunks_total, now, sha, queue_message_id))
+             "sending" if claimed else "pending", chunks_total, now, sha, queue_message_id,
+             json.dumps([str(a) for a in (attachments or [])])))
         _event(conn, rid, "enqueued", now, detail="claimed inline" if claimed else "queued")
         conn.execute("COMMIT")
     except BaseException:
