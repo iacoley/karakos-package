@@ -151,6 +151,28 @@ def test_propose_files_only_on_an_explicit_yes(ws):
     assert again["status"] == "already_filed" and len(sent) == 1
 
 
+def test_long_question_is_cut_and_says_so(ws):
+    cid = _seed(ws)
+    seen = []
+    long = lambda a: seen.append(a["question"]) or {"status": "answered", "answer": fr.OPTION_NO}  # noqa: E731
+    d = {"title": "T", "body": "x" * 5000}
+    q = fr._question("o/r", d)
+    assert len(q) == fr.QUESTION_MAX and q.endswith(fr.TRUNCATED_NOTE)
+    assert "cut" not in fr._question("o/r", {"title": "T", "body": "short"})
+    fr.propose_issue(ws, cid, "o/r", long)
+    assert len(seen[0]) <= fr.QUESTION_MAX
+
+
+def test_failed_filing_after_a_yes_returns_the_draft(ws):
+    cid = _seed(ws)
+
+    def boom(repo, t, b, tok):
+        raise RuntimeError("HTTP 403")
+    r = fr.propose_issue(ws, cid, "o/r", answer(fr.OPTION_FILE), post=boom)
+    assert r["status"] == "file_failed" and "403" in r["error"] and r["draft"]["title"]
+    assert fr.propose_issue(ws, cid, "o/r", answer(fr.OPTION_NO), post=boom)["status"] == "not_filed"
+
+
 def test_propose_refuses_one_day_causes_bad_repo_and_unknown_ids(ws):
     cid = _seed(ws, n_days=1)
     asked = []

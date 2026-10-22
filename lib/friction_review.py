@@ -153,6 +153,17 @@ def recent(workspace, days=7, limit=30) -> dict:
                        for c in group(rows)]}
 
 
+QUESTION_MAX = 1800
+TRUNCATED_NOTE = "\n[draft cut at %d characters; the full draft is in the tool result]" % QUESTION_MAX
+
+
+def _question(repo, d) -> str:
+    text = f"File this issue on {repo}?\n\n{d['title']}\n\n{d['body']}"
+    if len(text) <= QUESTION_MAX:
+        return text
+    return text[:QUESTION_MAX - len(TRUNCATED_NOTE)] + TRUNCATED_NOTE
+
+
 def propose_issue(workspace, cause, repo, ask, post=None, days=7) -> dict:
     """Draft the issue for one cause, ask a person through `ask(args)` (the
     ask_user tool), and file it only on their explicit yes. Never files without
@@ -173,9 +184,14 @@ def propose_issue(workspace, cause, repo, ask, post=None, days=7) -> dict:
     if c["days"] < MIN_DAYS:
         return {"status": "too_early", "reason": f"seen on {c['days']} day(s); needs {MIN_DAYS}"}
     d = draft_issue(c)
-    ans = ask({"question": f"File this issue on {repo}?\n\n{d['title']}\n\n{d['body']}"[:1800],
+    ans = ask({"question": _question(repo, d),
                "options": [OPTION_FILE, OPTION_NO], "header": "Friction review"})
     if ans.get("status") != "answered" or ans.get("answer") != OPTION_FILE:
         return {"status": "not_filed", "answer": ans.get("answer"), "draft": d}
-    done = file_issues(workspace, [c], repo, approved=True, post=post)
-    return {"status": "filed", "url": done[0]["url"] if done else None, "draft": d}
+    try:
+        done = file_issues(workspace, [c], repo, approved=True, post=post)
+    except Exception as e:  # noqa: BLE001 - the person said yes: hand back the draft, not a bare error
+        return {"status": "file_failed", "error": str(e), "draft": d}
+    if not done:
+        return {"status": "file_failed", "error": "no issue was created", "draft": d}
+    return {"status": "filed", "url": done[0]["url"], "draft": d}
