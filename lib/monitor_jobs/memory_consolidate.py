@@ -37,9 +37,10 @@ def _write_health(workspace: Path, ok: bool, stats: dict) -> None:
     os.replace(tmp, path)
 
 
-def _entity_dedup_pass(store, stats, now=None) -> None:
+def _entity_dedup_pass(store, stats, now=None, dry_run=False) -> None:
     """Optional weekly (Sunday) entity dedup: MEMORY_ENTITY_DEDUP=report lists
-    pairs, =live merges up to 50. Unset or anything else: off."""
+    pairs, =live merges up to 50 (never when the job runs with dry_run).
+    Unset or anything else: off."""
     mode = os.environ.get("MEMORY_ENTITY_DEDUP", "").strip().lower()
     if mode not in ("report", "live"):
         return
@@ -47,7 +48,7 @@ def _entity_dedup_pass(store, stats, now=None) -> None:
     if when.weekday() != 6:
         return
     try:
-        stats["entity_dedup"] = entity_dedup.run(store, live=(mode == "live"))
+        stats["entity_dedup"] = entity_dedup.run(store, live=(mode == "live" and not dry_run))
     except Exception as e:  # noqa: BLE001 - an optional pass never fails the job
         stats["entity_dedup"] = {"error": str(e)}
 
@@ -63,7 +64,7 @@ def run_job(ctx) -> dict:
         store = open_graph(ws / "data")
         stats = consolidate.run(store, now=get("now"), messages_dir=ws / "data" / "messages",
                                 score_fn=get("score_fn"), dry_run=bool(get("dry_run", False)))
-        _entity_dedup_pass(store, stats, get("now"))
+        _entity_dedup_pass(store, stats, get("now"), bool(get("dry_run", False)))
         stats["duration_s"] = round(time.time() - started, 2)
         if not get("dry_run", False):
             _write_health(ws, not stats["errors"],

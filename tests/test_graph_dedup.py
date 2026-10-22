@@ -47,7 +47,7 @@ def test_different_kinds_never_pair_and_below_threshold_is_ignored(store):
 
 
 def test_each_entity_appears_in_one_pair(store):
-    for n in ("a1", "a2", "a3"):
+    for n in ("Aria", "Aria B", "Aria C"):
         ent(store, n, (1, 0))
     assert len(entity_dedup.candidates(store)) == 1
 
@@ -65,8 +65,8 @@ def test_dry_run_changes_nothing_live_merges_softly(store):
 
 def test_live_run_is_capped(store, monkeypatch):
     for i in range(4):
-        ent(store, f"x{i}a", (1, i * 0.0), kind=f"k{i}")
-        ent(store, f"x{i}b", (1, 0), kind=f"k{i}")
+        ent(store, f"x{i} a", (1, i * 0.0), kind=f"k{i}")
+        ent(store, f"x{i} b", (1, 0), kind=f"k{i}")
     r = entity_dedup.run(store, live=True, max_merges=2)
     assert r["merged"] == 2 and r["capped"] is True and r["candidates"] == 4
     assert entity_dedup.run(store, live=True, max_merges=10_000)["merged"] == 2  # the rest, never above MAX
@@ -110,3 +110,58 @@ def test_weekly_pass_is_off_by_default_and_runs_on_sunday(store, monkeypatch):
     monkeypatch.setenv("MEMORY_ENTITY_DEDUP", "live")
     mc._entity_dedup_pass(store, stats, sunday)
     assert stats["entity_dedup"]["merged"] == 1
+
+
+def test_numbers_that_differ_never_merge_even_at_high_cosine(store):
+    # measured on bge-small: these score 0.94 on bare names
+    ent(store, "2026-10-19", (1, 0), kind="date")
+    ent(store, "2026-10-21", (1, 0.01), kind="date")
+    ent(store, "v2.2.0", (1, 0), kind="version")
+    ent(store, "v2.3.1", (1, 0.01), kind="version")
+    assert entity_dedup.candidates(store) == []
+
+
+def test_identical_numbers_still_pair(store):
+    ent(store, "release v2.3.1", (1, 0), kind="version")
+    ent(store, "Release v2.3.1 notes", (1, 0.01), kind="version")
+    assert len(entity_dedup.candidates(store)) == 1
+
+
+def test_unrelated_names_with_high_cosine_do_not_pair(store):
+    ent(store, "Mercury", (1, 0))
+    ent(store, "Quokka", (1, 0.01))
+    assert entity_dedup.candidates(store) == []
+
+
+def test_abbreviation_pairs_below_the_main_threshold_but_not_far_below(store):
+    ent(store, "Ian Coley", (1, 0))
+    ent(store, "ian c.", (0.72, 0.694))   # cosine 0.72, as measured
+    assert len(entity_dedup.candidates(store)) == 1
+    ent(store, "Dana Reyes", (1, 0), kind="other")
+    ent(store, "dana r.", (0.3, 0.954), kind="other")   # cosine 0.3: too far
+    assert len(entity_dedup.candidates(store)) == 1
+
+
+def test_same_thing_rules():
+    assert entity_dedup.same_thing("Ian Coley", "ian c.", 0.72)
+    assert not entity_dedup.same_thing("Ian Coley", "Bob Smith", 0.72)
+    assert not entity_dedup.same_thing("", "x", 0.99)
+
+
+def test_scoring_in_chunks_finds_the_same_pairs(store, monkeypatch):
+    for n in ("Echo", "Echo Two", "Foxtrot", "Foxtrot Two", "Golf", "Golf Two"):
+        ent(store, n, (1, 0) if n.startswith("Echo") else (0, 1) if n.startswith("Fox") else (1, 1))
+    whole = entity_dedup.candidates(store)
+    monkeypatch.setattr(entity_dedup, "CHUNK", 2)
+    assert entity_dedup.candidates(store) == whole and len(whole) == 3
+
+
+def test_weekly_pass_honours_dry_run(store, monkeypatch):
+    from lib.monitor_jobs import memory_consolidate as mc
+    ent(store, "Hotel", (1, 0))
+    b = ent(store, "Hotel Two", (1, 0))
+    monkeypatch.setenv("MEMORY_ENTITY_DEDUP", "live")
+    stats = {}
+    mc._entity_dedup_pass(store, stats, datetime(2026, 10, 18, tzinfo=timezone.utc), dry_run=True)
+    assert stats["entity_dedup"]["live"] is False and stats["entity_dedup"]["merged"] == 0
+    assert archived(store, b) is None

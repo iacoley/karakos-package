@@ -619,9 +619,15 @@ backfills embeddings.
 
 **Entity dedup:** `bin/graph-dedup.py` (`lib/graph/entity_dedup.py`) finds live
 entities of one kind whose embeddings have cosine similarity of at least 0.92 and
-folds the one with fewer observations into the other with `merge_entities`. It
-lists pairs by default; `--live` merges at most 50 per run. The nightly job can
-run it on Sundays when `MEMORY_ENTITY_DEDUP` is `report` or `live`.
+folds the one with fewer observations into the other with `merge_entities`.
+Embeddings of bare names rate unrelated things alike (two dates, two version
+numbers), and there is no unmerge, so a pair also needs a second signal from the
+names: identical number tokens, and either a shared token or close spelling, or
+one name an abbreviation of the other ("ian c." and "Ian Coley") at a cosine of
+at least 0.6. Scoring runs in blocks, so memory grows with the kind size times a
+fixed block, not its square. It lists pairs by default; `--live` merges at most 50
+per run. The nightly job can run it on Sundays when `MEMORY_ENTITY_DEDUP` is
+`report` or `live`; a job run with `dry_run` never merges.
 
 **Cleaning memory:** agents delete softly. `memory.forget` archives one
 observation and `memory.supersede` replaces it with new text (the old row gets

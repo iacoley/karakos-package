@@ -7,13 +7,57 @@ unless `live=True`; a live run merges at most MAX_MERGES pairs.
 """
 from __future__ import annotations
 
+import difflib
+import re
+
 import numpy as np
 
 from lib.graph import embed as _embed
 
 THRESHOLD = 0.92
+ABBREV_FLOOR = 0.6   # cosine floor for a pair whose names are abbreviations of each other
+LEX_RATIO = 0.6      # minimum name similarity (difflib) for a pair to count as lexically related
+CHUNK = 512          # rows scored per matrix block: memory is CHUNK x n, not n x n
 MAX_MERGES = 50
 AGENT = "graph-dedup"
+
+_TOKEN = re.compile(r"[a-z0-9]+")
+
+
+def _tokens(name) -> list:
+    return _TOKEN.findall(str(name).lower())
+
+
+def _digits(toks) -> list:
+    return sorted(t for t in toks if any(c.isdigit() for c in t))
+
+
+def _prefixes(short, long_) -> bool:
+    if not short or len(short) > len(long_):
+        return False
+    it = iter(long_)
+    return all(any(t.startswith(s_) for t in it) for s_ in short)
+
+
+def _abbrev(a, b) -> bool:
+    """Every token of one name is a prefix of a token of the other, in order
+    ("ian c." against "Ian Coley")."""
+    return _prefixes(a, b) or _prefixes(b, a)
+
+
+def same_thing(name_a, name_b, cosine, threshold=THRESHOLD) -> bool:
+    """The second signal. Embeddings of bare names score unrelated things high
+    (two dates, two version numbers), so a merge also needs the names to agree:
+    identical number tokens, and either a lexical resemblance at the usual
+    threshold or an abbreviation relation at a lower one."""
+    ta, tb = _tokens(name_a), _tokens(name_b)
+    if not ta or not tb or _digits(ta) != _digits(tb):
+        return False
+    if cosine >= threshold:
+        ratio = difflib.SequenceMatcher(None, " ".join(ta), " ".join(tb)).ratio()
+        if ratio >= LEX_RATIO or set(ta) & set(tb):
+            return True
+    return cosine >= ABBREV_FLOOR and _abbrev(ta, tb)
 
 
 def candidates(store, threshold=THRESHOLD) -> list:
@@ -36,10 +80,18 @@ def candidates(store, threshold=THRESHOLD) -> list:
         if len(items) < 2:
             continue
         m = np.vstack([v for _, v in items])
-        sims = m @ m.T
-        ii, jj = np.nonzero(np.triu(sims >= threshold, k=1))
-        for i, j in zip(ii, jj):
-            scored.append((float(sims[i, j]), items[int(i)][0], items[int(j)][0]))
+        floor = min(threshold, ABBREV_FLOOR)
+        for i0 in range(0, len(items), CHUNK):
+            sims = m[i0:i0 + CHUNK] @ m.T
+            ii, jj = np.nonzero(sims >= floor)
+            for i, j in zip(ii, jj):
+                i += i0
+                if j <= i:
+                    continue
+                score = float(sims[i - i0, j])
+                a_, b_ = items[int(i)][0], items[int(j)][0]
+                if same_thing(a_["name"], b_["name"], score, threshold):
+                    scored.append((score, a_, b_))
     scored.sort(key=lambda t: (-t[0], t[1]["id"], t[2]["id"]))
     used, out = set(), []
     for score, a, b in scored:
