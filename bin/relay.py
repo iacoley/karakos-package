@@ -1015,12 +1015,13 @@ class DiscordAdapter(discord.Client):
                 self.reply_gate.note_agent_post(message.channel.id)
 
             allowed = await self.allow_bot_message(message, target_agent, channel_config)
-            # A bot the relay will not deliver is never shown as context; a registered
-            # agent's post is still kept, because it may be the agent's own (the reset).
+            # A stranger bot the relay will not deliver is never shown as context. A
+            # registered agent's post is shown even when untagged (the answer to a
+            # question) and is how an agent's own post resets the window.
             self.channel_context.note(
                 message.channel.id, message.id, message.author.display_name, message.content,
                 author_id=message.author.id,
-                visible=allowed)
+                visible=allowed or message.author.id in discord_id_to_agent)
             if not allowed:
                 return
         else:

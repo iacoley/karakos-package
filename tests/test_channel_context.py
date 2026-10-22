@@ -168,3 +168,38 @@ def test_refused_bot_messages_are_never_shown_but_still_reset():
     c2 = cc.ChannelContext()
     c2.note(7, 1, "Stranger", "buy crypto", author_id=9, visible=False)
     assert c2.block(7, 2) == ""
+
+
+def test_relay_shows_untagged_sibling_posts_but_not_strangers(relay):
+    cls = next(v for v in vars(relay).values()
+               if isinstance(v, type) and hasattr(v, "on_message"))
+    relay.discord_id_to_agent.clear()
+    relay.discord_id_to_agent[22] = "amos"
+    seen = []
+
+    async def noop(*a, **k):
+        return None
+
+    async def refuse(*a, **k):
+        return False
+
+    me = SimpleNamespace(
+        user=SimpleNamespace(id=99), server_ids=set(), channel_context=cc.ChannelContext(),
+        reply_gate=SimpleNamespace(note_agent_post=lambda *a: None, note_message=lambda *a, **k: None),
+        capture_message=noop, get_channel_name=lambda c: None,
+        resolve_channel=lambda ch: (None, None), allow_bot_message=refuse,
+        guest_budget=SimpleNamespace(reset=lambda *a: None))
+    relay.maybe_reload_config = lambda: None
+    relay.channels_config = {"channels": {}}
+
+    def post(author_id, name, text, mid):
+        msg = SimpleNamespace(
+            id=mid, content=text, channel=SimpleNamespace(id=7, name="x", parent=None),
+            author=SimpleNamespace(id=author_id, display_name=name, bot=True), guild=None,
+            mentions=[], role_mentions=[], reference=None)
+        asyncio.run(cls.on_message(me, msg))
+
+    post(22, "Amos", "untagged answer", 1)
+    post(55, "Stranger", "buy crypto", 2)
+    out = me.channel_context.block(7, 3, own_ids={99})
+    assert "untagged answer" in out and "buy crypto" not in out
