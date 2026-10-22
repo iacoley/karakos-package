@@ -32,36 +32,41 @@ def _digits(toks) -> list:
     return sorted(t for t in toks if any(c.isdigit() for c in t))
 
 
-def _prefixes(short, long_) -> bool:
-    if not short or len(short) > len(long_):
-        return False
-    it = iter(long_)
-    return all(any(t.startswith(s_) for t in it) for s_ in short)
-
-
-def _abbrev(a, b) -> bool:
-    """Every token of one name is a prefix of a token of the other, in order
+def _shortened(a, b) -> bool:
+    """Same number of words; at each position the words are equal or one is a
+    shortened form (a strict prefix) of the other, and at least one differs
     ("ian c." against "Ian Coley")."""
-    return _prefixes(a, b) or _prefixes(b, a)
-
-
-def same_thing(name_a, name_b, cosine, threshold=THRESHOLD) -> bool:
-    """The second signal. Embeddings of bare names score unrelated things high
-    (two dates, two version numbers), so a merge also needs the names to agree:
-    identical number tokens, and either a lexical resemblance at the usual
-    threshold or an abbreviation relation at a lower one."""
-    ta, tb = _tokens(name_a), _tokens(name_b)
-    if not ta or not tb or _digits(ta) != _digits(tb):
+    if len(a) != len(b) or a == b:
         return False
+    return all(x == y or x.startswith(y) or y.startswith(x) for x, y in zip(a, b))
+
+
+def verdict(name_a, name_b, cosine, threshold=THRESHOLD):
+    """The second signal. Embeddings of bare names score unrelated things high
+    (two dates, two version numbers) and prefixes of longer names too ("Mike" and
+    "Mike Tyson"), so a merge also needs the names to agree. Returns:
+
+    - "merge": same number of words, identical number tokens, cosine at the
+      threshold and a shared word or close spelling;
+    - "abbrev": same number of words, identical number tokens, cosine at
+      ABBREV_FLOOR and the words differ only by shortening;
+    - "report": the names are related but one has fewer words (never merged);
+    - None: not a candidate."""
+    ta, tb = _tokens(name_a), _tokens(name_b)
+    if not ta or not tb or _digits(ta) != _digits(tb) or cosine < min(threshold, ABBREV_FLOOR):
+        return None
+    if len(ta) != len(tb):
+        related = set(ta) & set(tb) or _shortened(ta[:len(tb)], tb[:len(ta)])
+        return "report" if related else None
     if cosine >= threshold:
         ratio = difflib.SequenceMatcher(None, " ".join(ta), " ".join(tb)).ratio()
         if ratio >= LEX_RATIO or set(ta) & set(tb):
-            return True
-    return cosine >= ABBREV_FLOOR and _abbrev(ta, tb)
+            return "merge"
+    return "abbrev" if _shortened(ta, tb) else None
 
 
-def candidates(store, threshold=THRESHOLD) -> list:
-    """Pairs to merge, best score first; each entity appears in at most one pair."""
+def _scan(store, threshold):
+    """(merge pairs, report-only pairs), each best score first."""
     with store.read() as conn:
         rows = conn.execute(
             "SELECT e.id, e.name, e.kind, e.embedding, e.created_at, "
@@ -75,7 +80,7 @@ def candidates(store, threshold=THRESHOLD) -> list:
         n = float(np.linalg.norm(v)) if v is not None else 0.0
         if n > 0:
             by_kind.setdefault(r["kind"], []).append((r, v / n))
-    scored = []
+    found = []  # (score, a, b, verdict)
     for items in by_kind.values():
         if len(items) < 2:
             continue
@@ -90,11 +95,27 @@ def candidates(store, threshold=THRESHOLD) -> list:
                     continue
                 score = float(sims[i - i0, j])
                 a_, b_ = items[int(i)][0], items[int(j)][0]
-                if same_thing(a_["name"], b_["name"], score, threshold):
-                    scored.append((score, a_, b_))
-    scored.sort(key=lambda t: (-t[0], t[1]["id"], t[2]["id"]))
+                v = verdict(a_["name"], b_["name"], score, threshold)
+                if v:
+                    found.append((score, a_, b_, v))
+    # an abbreviation that fits two entities ("ian c." -> Ian Coley, Ian Cooper) is
+    # a guess: report it, merge neither
+    partners = {}
+    for _, a, b, v in found:
+        if v == "abbrev":
+            partners.setdefault(a["id"], set()).add(b["id"])
+            partners.setdefault(b["id"], set()).add(a["id"])
+    ambiguous = {i for i, ps in partners.items() if len(ps) > 1}
+    scored, reported = [], []
+    for score, a, b, v in found:
+        if v == "abbrev" and (a["id"] in ambiguous or b["id"] in ambiguous):
+            v = "ambiguous"
+        (scored if v in ("merge", "abbrev") else reported).append((score, a, b, v))
+    key = lambda t: (-t[0], t[1]["id"], t[2]["id"])  # noqa: E731
+    scored.sort(key=key)
+    reported.sort(key=key)
     used, out = set(), []
-    for score, a, b in scored:
+    for score, a, b, _ in scored:
         if a["id"] in used or b["id"] in used:
             continue
         # keep the entity with more live observations; tie: the older one
@@ -103,15 +124,30 @@ def candidates(store, threshold=THRESHOLD) -> list:
         out.append({"from": drop["id"], "from_name": drop["name"],
                     "into": keep["id"], "into_name": keep["name"],
                     "kind": a["kind"], "score": round(score, 4)})
-    return out
+    rep = [{"a": a["id"], "a_name": a["name"], "b": b["id"], "b_name": b["name"],
+            "kind": a["kind"], "score": round(score, 4), "why": v}
+           for score, a, b, v in reported]
+    return out, rep
+
+
+def candidates(store, threshold=THRESHOLD) -> list:
+    """Pairs to merge, best score first; each entity appears in at most one pair."""
+    return _scan(store, threshold)[0]
+
+
+def report_only(store, threshold=THRESHOLD) -> list:
+    """Related pairs that are listed but never merged: one name has fewer words
+    ("why": "report"), or an abbreviation fits several entities ("ambiguous")."""
+    return _scan(store, threshold)[1]
 
 
 def run(store, live=False, threshold=THRESHOLD, max_merges=MAX_MERGES) -> dict:
     cap = max(0, min(int(max_merges), MAX_MERGES))
-    found = candidates(store, threshold)
+    found, rep = _scan(store, threshold)
     batch = found[:cap]
     out = {"live": bool(live), "threshold": threshold, "candidates": len(found),
-           "capped": len(found) > cap, "pairs": batch, "merged": 0}
+           "capped": len(found) > cap, "pairs": batch, "merged": 0,
+           "report_only": rep[:MAX_MERGES], "report_only_count": len(rep)}
     if live:
         for p in batch:
             store.merge_entities(p["from"], p["into"],

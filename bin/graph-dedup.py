@@ -41,8 +41,11 @@ def main(argv=None):
     verb = "merged" if a.live else "would merge"
     for p in r["pairs"]:
         print(f"{verb} {p['from_name']!r} -> {p['into_name']!r} ({p['kind']}, cos {p['score']})")
+    for p in r["report_only"]:
+        print(f"review only ({p['why']}) {p['a_name']!r} | {p['b_name']!r} ({p['kind']}, cos {p['score']})")
     tail = " (capped)" if r["capped"] else ""
-    print(f"{r['candidates']} candidate pair(s); {r['merged']} merged{tail}"
+    print(f"{r['candidates']} candidate pair(s); {r['merged']} merged{tail}; "
+          f"{r['report_only_count']} listed for review, never merged"
           + ("" if a.live else "; dry run, use --live to merge"))
     return 0
 

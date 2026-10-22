@@ -53,8 +53,8 @@ def test_each_entity_appears_in_one_pair(store):
 
 
 def test_dry_run_changes_nothing_live_merges_softly(store):
-    a = ent(store, "Alpha", (1, 0), obs=2)
-    b = ent(store, "Alpha Beta", (1, 0))
+    a = ent(store, "Alpha Beta", (1, 0), obs=2)
+    b = ent(store, "Alpha Betta", (1, 0))
     dry = entity_dedup.run(store)
     assert dry["candidates"] == 1 and dry["merged"] == 0 and archived(store, b) is None
     live = entity_dedup.run(store, live=True)
@@ -82,8 +82,8 @@ def test_entities_without_current_model_embeddings_are_skipped(store):
 
 
 def test_cli_dry_run_then_live(store, tmp_path, capsys):
-    ent(store, "Gamma", (1, 0), obs=1)
-    ent(store, "Gamma Two", (1, 0))
+    ent(store, "Gamma Ray", (1, 0), obs=1)
+    ent(store, "Gamma Rays", (1, 0))
     cli = import_script("graph-dedup")
     assert cli.main(["--workspace", str(tmp_path), "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["merged"] == 0
@@ -96,8 +96,8 @@ def test_cli_dry_run_then_live(store, tmp_path, capsys):
 
 def test_weekly_pass_is_off_by_default_and_runs_on_sunday(store, monkeypatch):
     from lib.monitor_jobs import memory_consolidate as mc
-    ent(store, "Delta", (1, 0))
     ent(store, "Delta Prime", (1, 0))
+    ent(store, "Delta Primes", (1, 0))
     sunday, monday = datetime(2026, 10, 18, tzinfo=timezone.utc), datetime(2026, 10, 19, tzinfo=timezone.utc)
     stats = {}
     mc._entity_dedup_pass(store, stats, sunday)
@@ -122,8 +122,8 @@ def test_numbers_that_differ_never_merge_even_at_high_cosine(store):
 
 
 def test_identical_numbers_still_pair(store):
-    ent(store, "release v2.3.1", (1, 0), kind="version")
-    ent(store, "Release v2.3.1 notes", (1, 0.01), kind="version")
+    ent(store, "release notes v2.3.1", (1, 0), kind="version")
+    ent(store, "Release note v2.3.1", (1, 0.01), kind="version")
     assert len(entity_dedup.candidates(store)) == 1
 
 
@@ -142,14 +142,50 @@ def test_abbreviation_pairs_below_the_main_threshold_but_not_far_below(store):
     assert len(entity_dedup.candidates(store)) == 1
 
 
-def test_same_thing_rules():
-    assert entity_dedup.same_thing("Ian Coley", "ian c.", 0.72)
-    assert not entity_dedup.same_thing("Ian Coley", "Bob Smith", 0.72)
-    assert not entity_dedup.same_thing("", "x", 0.99)
+def test_verdict_rules():
+    v = entity_dedup.verdict
+    assert v("Ian Coley", "ian c.", 0.72) == "abbrev"
+    assert v("Ian Coley", "Bob Smith", 0.72) is None
+    assert v("", "x", 0.99) is None
+    assert v("Delta Prime", "Delta Primes", 0.95) == "merge"
+
+
+# Pairs Amos measured with the real bge-small: none may merge.
+@pytest.mark.parametrize("a,b,cos", [
+    ("karakos", "karakos-package", 0.862), ("Marvin", "Marvin harness", 0.850),
+    ("Mike", "Mike Tyson", 0.721), ("Alpha", "Alpha Beta", 0.95)])
+def test_fewer_words_is_reported_never_merged(store, a, b, cos):
+    assert entity_dedup.verdict(a, b, cos) == "report"
+    x = ent(store, a, (1, 0), obs=1)
+    y = ent(store, b, (cos, (1 - cos * cos) ** 0.5))
+    assert entity_dedup.candidates(store) == []
+    [r] = entity_dedup.report_only(store)
+    assert {r["a"], r["b"]} == {x, y} and r["why"] == "report"
+    assert entity_dedup.run(store, live=True)["merged"] == 0
+    assert archived(store, x) is None and archived(store, y) is None
+
+
+def test_an_abbreviation_that_fits_two_entities_merges_neither(store):
+    a = ent(store, "ian c.", (1, 0))
+    b = ent(store, "Ian Cooper", (0.795, 0.606))   # cosine 0.795 to "ian c.", as measured
+    d = ent(store, "Ian Coley", (0.795, -0.606))   # the two Ians stay far apart
+    assert entity_dedup.candidates(store) == []
+    assert {r["why"] for r in entity_dedup.report_only(store)} == {"ambiguous"}
+    entity_dedup.run(store, live=True)
+    assert all(archived(store, i) is None for i in (a, b, d))
+
+
+def test_cli_lists_review_only_pairs(store, tmp_path, capsys):
+    ent(store, "Mike", (1, 0))
+    ent(store, "Mike Tyson", (0.8, 0.6))
+    cli = import_script("graph-dedup")
+    assert cli.main(["--workspace", str(tmp_path)]) == 0
+    out = capsys.readouterr().out
+    assert "review only (report)" in out and "0 merged" in out
 
 
 def test_scoring_in_chunks_finds_the_same_pairs(store, monkeypatch):
-    for n in ("Echo", "Echo Two", "Foxtrot", "Foxtrot Two", "Golf", "Golf Two"):
+    for n in ("Echo Two", "Echo Twos", "Foxtrot Two", "Foxtrot Twos", "Golf Two", "Golf Twos"):
         ent(store, n, (1, 0) if n.startswith("Echo") else (0, 1) if n.startswith("Fox") else (1, 1))
     whole = entity_dedup.candidates(store)
     monkeypatch.setattr(entity_dedup, "CHUNK", 2)
@@ -158,8 +194,8 @@ def test_scoring_in_chunks_finds_the_same_pairs(store, monkeypatch):
 
 def test_weekly_pass_honours_dry_run(store, monkeypatch):
     from lib.monitor_jobs import memory_consolidate as mc
-    ent(store, "Hotel", (1, 0))
-    b = ent(store, "Hotel Two", (1, 0))
+    ent(store, "Hotel Two", (1, 0))
+    b = ent(store, "Hotel Twos", (1, 0))
     monkeypatch.setenv("MEMORY_ENTITY_DEDUP", "live")
     stats = {}
     mc._entity_dedup_pass(store, stats, datetime(2026, 10, 18, tzinfo=timezone.utc), dry_run=True)
