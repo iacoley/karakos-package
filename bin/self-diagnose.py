@@ -157,38 +157,55 @@ def check_buildqueue(ws):
     db = Path(ws) / "data" / "build-queue.db"
     if not db.is_file():
         return [_f("buildqueue", "warn", "build queue is enabled but data/build-queue.db is missing")]
+    now = int(datetime.now(timezone.utc).timestamp())
     conn = sqlite3.connect(db.as_uri() + "?mode=ro", uri=True)
     try:
+        # Rows held back on purpose (`not_before` in the future) are not stuck.
         queued = conn.execute("SELECT MIN(created_at), COUNT(*) FROM build_queue "
-                              "WHERE status='queued'").fetchone()
+                              "WHERE status='queued' AND (not_before IS NULL OR not_before<=?)",
+                              (now,)).fetchone()
+        held = conn.execute("SELECT COUNT(*) FROM build_queue "
+                            "WHERE status='queued' AND not_before>?", (now,)).fetchone()[0]
         running = conn.execute("SELECT COUNT(*) FROM build_queue WHERE status='running'").fetchone()[0]
     finally:
         conn.close()
     oldest, n = queued
+    note = f", {held} held" if held else ""
     if not n:
-        return []
+        return [_f("buildqueue", "info", f"{held} build(s) held, {running} running")] if held else []
     try:
         age = (datetime.now(timezone.utc)
                - datetime.fromisoformat(oldest.replace("Z", "+00:00"))).total_seconds()
     except (ValueError, AttributeError):
-        return [_f("buildqueue", "info", f"{n} build(s) queued, {running} running")]
+        return [_f("buildqueue", "info", f"{n} build(s) queued, {running} running{note}")]
     if age > QUEUE_STUCK_S and not running:
         return [_f("buildqueue", "warn",
-                   f"{n} build(s) queued, oldest {int(age // 60)} min, none running")]
-    return [_f("buildqueue", "info", f"{n} build(s) queued, {running} running")]
+                   f"{n} build(s) queued, oldest {int(age // 60)} min, none running{note}")]
+    return [_f("buildqueue", "info", f"{n} build(s) queued, {running} running{note}")]
+
+
+def _ver(v):
+    try:
+        return tuple(int(x) for x in str(v).split("."))
+    except ValueError:
+        return None
 
 
 def check_version(ws):
-    """The code's VERSION against the package version that last stamped the data."""
+    """The code's VERSION against the package version stamped on the data. The stamp
+    is only written by `karakos migrate` and can lag the code, so a stamp older than
+    the code is normal and stays quiet; only data stamped by a NEWER package (a
+    downgrade) is reported."""
     try:
         code = (Path(ws) / "VERSION").read_text().strip()
     except OSError:
         return [_f("version", "info", "no VERSION file; cannot compare")]
     stamp = _read_json(Path(ws) / "data" / ".schema-version") or {}
     stamped = stamp.get("package")
-    if code and isinstance(stamped, str) and stamped != code:
-        return [_f("version", "info",
-                   f"code is {code}, data was last stamped by {stamped} (karakos migrate restamps)")]
+    cv, sv = _ver(code), _ver(stamped)
+    if cv and sv and sv > cv:
+        return [_f("version", "warn",
+                   f"code is {code} but data was stamped by newer package {stamped}: downgrade?")]
     return []
 
 
