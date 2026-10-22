@@ -217,3 +217,34 @@ def test_send_time_recheck_rejects_a_swapped_file(ags, tmp_path):
     assert asyncio.run(ags.outbox_send_row(row)) is None
     assert ags.http_session.calls == 0
     assert rows(ags)[0]["status"] == "dead"
+
+
+def test_413_on_files_retries_once_as_text_only(ags, tmp_path):
+    root = tmp_path / "data" / "outgoing"
+    root.mkdir(parents=True, exist_ok=True)
+    fake = FakeDiscord([413, 200])
+    posts = []
+    orig = fake.post
+
+    def post(url, **kw):
+        posts.append(kw)
+        return orig(url, **kw)
+    fake.post = post
+    ags.http_session = fake
+    rid, row = _row_with(ags, root, ["a.mp3"], content="the reply text")
+    assert asyncio.run(ags.outbox_send_row(row)) == "msg-2"
+    assert "data" in posts[0] and "json" in posts[1]            # multipart, then plain JSON
+    body = posts[1]["json"]
+    assert body["content"].startswith("the reply text") and "files not sent" in body["content"]
+    assert "attachments" not in body
+    assert rows(ags)[0]["status"] == "delivered"
+
+
+def test_413_text_only_retry_is_not_repeated(ags, tmp_path):
+    root = tmp_path / "data" / "outgoing"
+    root.mkdir(parents=True, exist_ok=True)
+    fake = FakeDiscord([413, 413])
+    ags.http_session = fake
+    rid, row = _row_with(ags, root, ["a.mp3"])
+    assert asyncio.run(ags.outbox_send_row(row)) is None
+    assert fake.calls == 2 and rows(ags)[0]["status"] != "delivered"

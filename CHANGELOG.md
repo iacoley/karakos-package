@@ -20,7 +20,7 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Outbound Discord file attachments (#277). A durable reply can carry files: put
   `[[attach: path]]` on its own line and the outbox sends them with the first chunk
   as multipart. Paths must resolve inside `data/outgoing/` (symlinks followed; the rest of `data/`, including the message store, is off limits), be non-empty and
-  within `MAX_ATTACHMENT_BYTES` (also the cap on all files together) / `MAX_ATTACHMENTS_PER_MESSAGE`; files are checked again when sent; a refused file is
+  within `MAX_ATTACHMENT_BYTES` (also the cap on all files together) / `MAX_ATTACHMENTS_PER_MESSAGE`; files are checked again when sent; if Discord answers 413 the first chunk is retried once without the files and says so; a refused file is
   reported in the reply and the text still goes out. New `attachments` column on the
   outbox table, added in place by `open_store`.
 

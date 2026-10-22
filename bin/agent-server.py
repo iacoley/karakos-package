@@ -1898,6 +1898,7 @@ async def outbox_send_row(row: Dict[str, Any]) -> Optional[str]:
         status: Optional[int] = None
         retry_after = None
         detail = ""
+        files_too_big = False
         try:
             request_kwargs: Dict[str, Any] = {"json": payload}
             files = json.loads(row.get("attachments") or "[]") if idx == 0 else []
@@ -1946,10 +1947,33 @@ async def outbox_send_row(row: Dict[str, Any]) -> Optional[str]:
                     except Exception:
                         body = ""
                     detail = _discord_error_detail(status, body)
+                    files_too_big = status == 413 and bool(files)
         except asyncio.CancelledError:
             raise
         except Exception as e:
             status, detail = None, f"{type(e).__name__}: {str(e)[:100]}"
+        if files_too_big:
+            # Discord's bot upload limit is not fixed; do not lose the reply text with
+            # the files. Send this chunk once more without them, saying why.
+            log.warning(f"Discord outbox: files refused as too large for {rid}; sending text only")
+            note = "\n\n(files not sent: too large for Discord)"
+            text = chunks[idx] + note if len(chunks[idx]) + len(note) <= MAX_DISCORD_MSG_LEN \
+                else chunks[idx]
+            plain = {k: v for k, v in payload.items() if k != "attachments"}
+            plain["content"] = text
+            try:
+                async with http_session.post(url, headers=headers, json=plain) as resp2:
+                    if resp2.status in (200, 201):
+                        msg_id = str((await resp2.json()).get("id"))
+                        outbox_lib.record_chunk(conn, rid, msg_id, _outbox_now())
+                        ids.append(msg_id)
+                        continue
+                    status, detail = resp2.status, _discord_error_detail(
+                        resp2.status, await resp2.text())
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                status, detail = None, f"{type(e).__name__}: {str(e)[:100]}"
         kind = outbox_lib.classify(status)
         log.error(f"Discord outbox: chunk {idx + 1}/{len(chunks)} for {rid} failed ({detail})")
         outbox_lib.record_failure(conn, rid, kind, status, detail, retry_after, _outbox_now())
