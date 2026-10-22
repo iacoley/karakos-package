@@ -26,10 +26,12 @@ git fetch upstream
 git switch -c fix/short-description upstream/develop
 ```
 
-Or, from an existing install clone with a `fork` remote:
+Or, from an existing install clone that has your fork added as a remote named `fork`:
 
 ```bash
+git fetch origin develop
 git worktree add -b fix/short-description data/work/karakos-pr origin/develop
+# push with: git push -u fork fix/short-description
 ```
 
 Every PR targets `develop`. Never push to `main` or `develop`.

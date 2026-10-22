@@ -34,7 +34,15 @@ def test_diag_names_only_real_sections():
 def test_skills_reference_admin_tools_that_exist():
     import re
     admin = (PACKAGE_ROOT / "mcp" / "admin-server.py").read_text()
+    tools_server = (PACKAGE_ROOT / "mcp" / "tools-server.py").read_text()
+    assert '"tail_log"' in admin and '"ask_user"' in tools_server
     for name in SHIPPED:
         text = (SKILLS / name / "SKILL.md").read_text()
-        for tool in re.findall(r"`((?:get|set|list|reload|reset|pause|resume)_[a-z_]+)`", text):
+        for tool in re.findall(r"`((?:get|set|list|reload|reset|pause|resume|tail)_[a-z_]+)`", text):
             assert f'"{tool}"' in admin, f"{name} mentions admin tool {tool} that does not exist"
+
+
+def test_restart_skill_asks_before_reset_and_picks_one_reset():
+    text = (SKILLS / "restart-and-recover" / "SKILL.md").read_text()
+    assert "Ask the owner first" in text and "ask_user" in text
+    assert "do not also call `reset_agent`" in text

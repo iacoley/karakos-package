@@ -27,8 +27,11 @@ Stop at the first step that works.
    A long tool call is not a wedge.
 3. `reload_agent`: respawns the process and keeps the session context. This also
    picks up changed `config/agents.yaml` env allowlist entries.
-4. `reset_agent`: starts a new session. **The context is destroyed.** Write a handoff
-   note first if the agent can still run a turn (`session` tool, `finalize`).
+4. A fresh session, when reload did not help. **Ask the owner first** (`ask_user`):
+   a reset destroys the context. Then pick exactly one:
+   - the agent can still run a turn: write a handoff note and `session` `finalize`.
+     That already starts a fresh session after the turn, so do not also call `reset_agent`;
+   - the agent cannot run a turn: `reset_agent`, with the owner's yes.
 5. Wedged server or relay, not just one agent: this needs the host
    (`make down && make up`). You cannot do that from inside; tell the owner.
 

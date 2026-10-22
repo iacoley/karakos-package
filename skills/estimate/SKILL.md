@@ -13,8 +13,8 @@ If you cannot name the files it touches, you do not know enough to estimate it y
 
 ## 2. Estimate each build in agent minutes
 
-- Read-and-change in one file, with a test: about 10 to 15 minutes.
-- A new module with tests and docs: about 20 to 30 minutes.
+- Read-and-change in one file, with a test: a few minutes (measured builds run a median of about 4).
+- A new module with tests and docs: 15 to 30 minutes.
 - Anything touching a protected path adds a review round trip. Do not count the
   wait as your time, but do say it in the estimate.
 - Add a review-fix round for every build that goes through review. Two rounds is
