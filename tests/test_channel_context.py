@@ -141,3 +141,30 @@ def test_relay_prepends_the_context_block(relay):
 def test_relay_context_messages_zero_delivers_the_bare_message(relay):
     c = ring(("Ian", "the draft is wrong"))
     assert _deliver(relay, c, {"context_messages": 0}) == "@marvin take this"
+
+
+def test_own_is_decided_per_agent_by_bot_account():
+    c = cc.ChannelContext()
+    c.note(7, 101, "Ian", "old", author_id=1, ts=1_700_000_060)
+    c.note(7, 102, "Amos", "amos reply", author_id=22, ts=1_700_000_120)
+    c.note(7, 103, "Marvin", "marvin reply", author_id=33, ts=1_700_000_180)
+    c.note(7, 104, "Ian", "new", author_id=1, ts=1_700_000_240)
+    c.note(7, 105, "Ian", "@x go", author_id=1, ts=1_700_000_300)
+    amos = c.block(7, 105, own_ids={22})
+    assert "new" in amos and "marvin reply" in amos and "amos reply" not in amos and "old" not in amos
+    marvin = c.block(7, 105, own_ids={33})
+    assert "new" in marvin and "marvin reply" not in marvin and "old" not in marvin
+
+
+def test_refused_bot_messages_are_never_shown_but_still_reset():
+    c = cc.ChannelContext()
+    c.note(7, 101, "Ian", "visible human", author_id=1, ts=1_700_000_060)
+    c.note(7, 102, "Stranger", "buy crypto", author_id=9, visible=False, ts=1_700_000_120)
+    c.note(7, 103, "Amos", "my own post", author_id=22, visible=False, ts=1_700_000_180)
+    c.note(7, 104, "Ian", "after", author_id=1, ts=1_700_000_240)
+    out = c.block(7, 105, own_ids={22})
+    assert "after" in out and "buy crypto" not in out and "my own post" not in out
+    assert "visible human" not in out        # the agent's own (refused) post still reset the window
+    c2 = cc.ChannelContext()
+    c2.note(7, 1, "Stranger", "buy crypto", author_id=9, visible=False)
+    assert c2.block(7, 2) == ""

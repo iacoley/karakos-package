@@ -847,6 +847,15 @@ def presence_for(target: str):
 # Discord Adapter
 # =============================================================================
 
+def _own_bot_ids(agent, user=None) -> set:
+    """Bot account ids this agent posts as: its own token's account, or the relay's
+    account when it has none (then it posts through the primary bot)."""
+    ids = {i for i, a in discord_id_to_agent.items() if a == agent}
+    if not ids and user is not None:
+        ids.add(user.id)
+    return ids
+
+
 class DiscordAdapter(discord.Client):
     """Discord message routing to agent server"""
 
@@ -942,7 +951,7 @@ class DiscordAdapter(discord.Client):
         # keep answering in, and that is only knowable from our own traffic.
         if message.author == self.user:
             self.channel_context.note(message.channel.id, message.id, message.author.display_name,
-                                      message.content, own=True)
+                                      message.content, author_id=message.author.id)
             self.reply_gate.note_agent_post(message.channel.id)
             own_name, _ = self.resolve_channel(message.channel)
             if own_name and ((channels_config.get("channels", {}).get(own_name) or {})
@@ -955,9 +964,6 @@ class DiscordAdapter(discord.Client):
         # Ignore messages from servers we aren't configured for
         if message.guild and str(message.guild.id) not in self.server_ids:
             return
-
-        self.channel_context.note(message.channel.id, message.id, message.author.display_name,
-                                  message.content)
 
         # Capture message
         await self.capture_message(message)
@@ -1008,9 +1014,19 @@ class DiscordAdapter(discord.Client):
             if message.author.id in discord_id_to_agent:
                 self.reply_gate.note_agent_post(message.channel.id)
 
-            if not await self.allow_bot_message(message, target_agent, channel_config):
+            allowed = await self.allow_bot_message(message, target_agent, channel_config)
+            # A bot the relay will not deliver is never shown as context; a registered
+            # agent's post is still kept, because it may be the agent's own (the reset).
+            self.channel_context.note(
+                message.channel.id, message.id, message.author.display_name, message.content,
+                author_id=message.author.id,
+                visible=allowed)
+            if not allowed:
                 return
         else:
+            self.channel_context.note(
+                message.channel.id, message.id, message.author.display_name, message.content,
+                author_id=message.author.id)
             # A human spoke: the bot-to-bot budget refills.
             self.guest_budget.reset(message.channel.id)
 
@@ -2015,7 +2031,8 @@ class DiscordAdapter(discord.Client):
             content = f"{reply_block}\n{content}" if content else reply_block
         # Messages since the agent last spoke here, so "this" and "that" have a referent.
         ctx_block = self.channel_context.block(
-            message.channel.id, message.id, channel_context.context_limit(chan_cfg))
+            message.channel.id, message.id, channel_context.context_limit(chan_cfg),
+            own_ids=_own_bot_ids(agent, getattr(self, "user", None)))
         if ctx_block:
             content = f"{ctx_block}\n{content}" if content else ctx_block
 
