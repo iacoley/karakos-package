@@ -19,8 +19,8 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Entity dedup (build B of #238): `bin/graph-dedup.py` lists, and with `--live` merges (at most 50 per run), same-kind entities whose embeddings are nearly identical, using the soft `merge_entities`. The nightly `memory-consolidate` job runs it on Sundays when `MEMORY_ENTITY_DEDUP` is `report` or `live`; off by default. A pair also needs a second signal from the names (identical number tokens and the same number of words, plus a shared word, close spelling or an abbreviation; names with fewer words and ambiguous abbreviations are only listed for review), so dates and version numbers no longer merge; the weekly pass honours `dry_run` and scores in blocks.
 - Outbound Discord file attachments (#277). A durable reply can carry files: put
   `[[attach: path]]` on its own line and the outbox sends them with the first chunk
-  as multipart. Paths must resolve inside `data/` (symlinks followed), be non-empty and
-  within `MAX_ATTACHMENT_BYTES` / `MAX_ATTACHMENTS_PER_MESSAGE`; a refused file is
+  as multipart. Paths must resolve inside `data/outgoing/` (symlinks followed; the rest of `data/`, including the message store, is off limits), be non-empty and
+  within `MAX_ATTACHMENT_BYTES` (also the cap on all files together) / `MAX_ATTACHMENTS_PER_MESSAGE`; files are checked again when sent; a refused file is
   reported in the reply and the text still goes out. New `attachments` column on the
   outbox table, added in place by `open_store`.
 

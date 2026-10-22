@@ -1831,6 +1831,9 @@ def _discord_error_detail(status: Optional[int], body: str) -> str:
 
 MAX_OUTBOUND_ATTACHMENT_BYTES = int(os.environ.get("MAX_ATTACHMENT_BYTES", str(25 * 1024 * 1024)))
 MAX_OUTBOUND_ATTACHMENTS = int(os.environ.get("MAX_ATTACHMENTS_PER_MESSAGE", "10"))
+# Agents may attach only files they put in this folder, never the rest of data/
+# (which holds the message store and other state).
+OUTGOING_ATTACHMENT_DIR = WORKSPACE_ROOT / "data" / "outgoing"
 
 
 def _attachment_form(payload: Dict[str, Any], paths: List[str]) -> "aiohttp.FormData":
@@ -1842,8 +1845,13 @@ def _attachment_form(payload: Dict[str, Any], paths: List[str]) -> "aiohttp.Form
     """
     form = aiohttp.FormData()
     form.add_field("payload_json", json.dumps(payload), content_type="application/json")
+    total = 0
     for n, path in enumerate(paths):
-        form.add_field(f"files[{n}]", Path(path).read_bytes(),
+        data = Path(path).read_bytes()
+        total += len(data)
+        if total > MAX_OUTBOUND_ATTACHMENT_BYTES:   # grew since it was checked
+            raise OSError("attachments grew past the size limit")
+        form.add_field(f"files[{n}]", data,
                        filename=Path(path).name, content_type="application/octet-stream")
     return form
 
@@ -1897,8 +1905,13 @@ async def outbox_send_row(row: Dict[str, Any]) -> Optional[str]:
                 payload["attachments"] = [{"id": n, "filename": Path(f).name}
                                           for n, f in enumerate(files)]
                 try:
+                    # checked again now: the file may have been swapped or grown
+                    # (or a symlink planted) since the reply was queued
+                    files = outbox_lib.resolve_attachments(
+                        files, OUTGOING_ATTACHMENT_DIR, MAX_OUTBOUND_ATTACHMENT_BYTES,
+                        MAX_OUTBOUND_ATTACHMENTS)
                     form = _attachment_form(payload, files)
-                except OSError as e:
+                except (OSError, outbox_lib.AttachmentError) as e:
                     log.error(f"Discord outbox: attachment unreadable for {rid}: {e}")
                     outbox_lib.record_failure(conn, rid, "permanent", None,
                                               f"attachment unreadable: {type(e).__name__}",
@@ -2151,7 +2164,7 @@ async def post_to_discord(agent: str, channel_id: str, content: str,
     attachments: List[str] = []
     if dead_letter and "[[attach:" in (content or ""):
         content, attachments, notes = outbox_lib.extract_attachments(
-            content, WORKSPACE_ROOT / "data", MAX_OUTBOUND_ATTACHMENT_BYTES,
+            content, OUTGOING_ATTACHMENT_DIR, MAX_OUTBOUND_ATTACHMENT_BYTES,
             MAX_OUTBOUND_ATTACHMENTS)
         for note in notes:
             log.warning(f"outbound attachment refused agent={agent}: {note}")

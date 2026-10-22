@@ -17,8 +17,8 @@ def conn(tmp_path):
 
 @pytest.fixture
 def root(tmp_path):
-    r = tmp_path / "data"
-    r.mkdir()
+    r = tmp_path / "data" / "outgoing"
+    r.mkdir(parents=True)
     return r
 
 
@@ -96,8 +96,8 @@ def _row_with(ags, root, names, content="here"):
 
 
 def test_send_row_posts_multipart_with_files(ags, tmp_path):
-    root = tmp_path / "data"
-    root.mkdir(exist_ok=True)
+    root = tmp_path / "data" / "outgoing"
+    root.mkdir(parents=True, exist_ok=True)
     fake = FakeDiscord()
     seen = {}
     orig = fake.post
@@ -115,8 +115,8 @@ def test_send_row_posts_multipart_with_files(ags, tmp_path):
 
 
 def test_send_row_missing_file_is_permanent(ags, tmp_path):
-    root = tmp_path / "data"
-    root.mkdir(exist_ok=True)
+    root = tmp_path / "data" / "outgoing"
+    root.mkdir(parents=True, exist_ok=True)
     ags.http_session = FakeDiscord()
     rid, row = _row_with(ags, root, ["a.mp3"])
     (root / "a.mp3").unlink()
@@ -156,8 +156,8 @@ def test_extract_ignores_inline_mentions(root):
 
 
 def test_post_to_discord_queues_attachments(ags, tmp_path):
-    root = tmp_path / "data"
-    root.mkdir(exist_ok=True)
+    root = tmp_path / "data" / "outgoing"
+    root.mkdir(parents=True, exist_ok=True)
     (root / "a.mp3").write_bytes(b"x")
     fake = FakeDiscord()
     ags.http_session = fake
@@ -170,9 +170,50 @@ def test_post_to_discord_queues_attachments(ags, tmp_path):
 
 
 def test_post_to_discord_attachment_only_reply_has_text(ags, tmp_path):
-    root = tmp_path / "data"
-    root.mkdir(exist_ok=True)
+    root = tmp_path / "data" / "outgoing"
+    root.mkdir(parents=True, exist_ok=True)
     (root / "a.mp3").write_bytes(b"x")
     ags.http_session = FakeDiscord()
     out = asyncio.run(ags.post_to_discord("amos", "123", "[[attach: a.mp3]]", dead_letter=True))
     assert out == "msg-1" and rows(ags)[0]["content"] == "Attached: a.mp3"
+
+
+def test_only_the_outgoing_folder_qualifies(ags, tmp_path):
+    """The message store sits under data/ but outside data/outgoing/: never sendable."""
+    data = tmp_path / "data"
+    (data / "outgoing").mkdir(parents=True, exist_ok=True)
+    (data / "memory").mkdir(exist_ok=True)
+    (data / "memory" / "agent-server.db").write_bytes(b"secrets")
+    ags.http_session = FakeDiscord()
+    out = asyncio.run(ags.post_to_discord(
+        "amos", "123", "here\n[[attach: ../memory/agent-server.db]]\n"
+        f"[[attach: {data / 'memory' / 'agent-server.db'}]]", dead_letter=True))
+    assert out == "msg-1"
+    row = rows(ags)[0]
+    assert json.loads(row["attachments"]) == []
+    assert row["content"].count("attachment not sent") == 2
+
+
+def test_total_size_is_capped(root):
+    (root / "a").write_bytes(b"xxxx")
+    (root / "b").write_bytes(b"xxxx")
+    with pytest.raises(ob.AttachmentError, match="together"):
+        ob.resolve_attachments(["a", "b"], root, max_bytes=5, max_total=7)
+    clean, paths, notes = ob.extract_attachments("hi\n[[attach: a]]\n[[attach: b]]", root,
+                                                 max_bytes=5, max_total=7)
+    assert len(paths) == 1 and len(notes) == 1 and "together" in notes[0]
+    assert clean == "hi"
+
+
+def test_send_time_recheck_rejects_a_swapped_file(ags, tmp_path):
+    root = tmp_path / "data" / "outgoing"
+    root.mkdir(parents=True, exist_ok=True)
+    secret = tmp_path / "data" / "secret.db"
+    secret.write_bytes(b"s")
+    ags.http_session = FakeDiscord()
+    rid, row = _row_with(ags, root, ["a.mp3"])
+    (root / "a.mp3").unlink()
+    (root / "a.mp3").symlink_to(secret)     # swapped after queueing
+    assert asyncio.run(ags.outbox_send_row(row)) is None
+    assert ags.http_session.calls == 0
+    assert rows(ags)[0]["status"] == "dead"

@@ -123,16 +123,20 @@ class AttachmentError(ValueError):
     """An outbound attachment was refused (outside the root, missing, too big)."""
 
 
-def resolve_attachments(paths, root, max_bytes=25 * 1024 * 1024, max_count=10):
+def resolve_attachments(paths, root, max_bytes=25 * 1024 * 1024, max_count=10,
+                        max_total=None):
     """Validate outbound attachment paths; return their resolved absolute paths.
 
     Every path must resolve (symlinks followed) to a regular file inside `root`,
-    be non-empty and no larger than `max_bytes`; at most `max_count` files.
-    Raises AttachmentError on the first problem so nothing is half-queued.
+    be non-empty and no larger than `max_bytes`; at most `max_count` files, and
+    together no larger than `max_total` (default `max_bytes`, Discord's per-message
+    limit). Raises AttachmentError on the first problem so nothing is half-queued.
     """
     paths = list(paths or [])
     if len(paths) > max_count:
         raise AttachmentError(f"too many attachments ({len(paths)} > {max_count})")
+    max_total = max_bytes if max_total is None else max_total
+    total = 0
     base = Path(root).resolve()
     out = []
     for raw in paths:
@@ -147,6 +151,9 @@ def resolve_attachments(paths, root, max_bytes=25 * 1024 * 1024, max_count=10):
             raise AttachmentError(f"attachment is empty: {raw}")
         if size > max_bytes:
             raise AttachmentError(f"attachment too large ({size} > {max_bytes}): {raw}")
+        total += size
+        if total > max_total:
+            raise AttachmentError(f"attachments too large together ({total} > {max_total})")
         out.append(str(p))
     return out
 
@@ -154,7 +161,8 @@ def resolve_attachments(paths, root, max_bytes=25 * 1024 * 1024, max_count=10):
 _ATTACH_RE = re.compile(r"^[ \t]*\[\[attach:\s*(.+?)\s*\]\][ \t]*$", re.MULTILINE)
 
 
-def extract_attachments(text, root, max_bytes=25 * 1024 * 1024, max_count=10):
+def extract_attachments(text, root, max_bytes=25 * 1024 * 1024, max_count=10,
+                        max_total=None):
     """Pull `[[attach: path]]` lines out of a reply.
 
     Returns (clean_text, paths, notes). Valid files come back as resolved paths;
@@ -165,15 +173,16 @@ def extract_attachments(text, root, max_bytes=25 * 1024 * 1024, max_count=10):
 
     def take(m):
         raw = m.group(1)
-        try:
-            ok = resolve_attachments([raw], root, max_bytes, 1)
-        except AttachmentError as e:
-            notes.append(str(e))
-            return ""
         if len(paths) >= max_count:
             notes.append(f"too many attachments (max {max_count}): {raw}")
             return ""
-        paths.append(ok[0])
+        try:
+            # re-validate the accepted set plus this one, so the total cap holds
+            ok = resolve_attachments(paths + [raw], root, max_bytes, max_count, max_total)
+        except AttachmentError as e:
+            notes.append(str(e))
+            return ""
+        paths[:] = ok
         return ""
 
     clean = _ATTACH_RE.sub(take, text or "")

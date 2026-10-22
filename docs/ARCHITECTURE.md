@@ -666,8 +666,8 @@ Hard delete is not an agent action. `taskboard.delete` tombstones a task with
   `dead_letters` counts dead rows and `dead_letter_path` is deprecated.
   A durable reply can carry files: a line `[[attach: path]]` is stripped from the
   text and the file is sent with the first chunk as multipart (`attachments` column,
-  `lib/outbox.py` `resolve_attachments`). Only files inside `data/` qualify, capped by
-  `MAX_ATTACHMENT_BYTES` and `MAX_ATTACHMENTS_PER_MESSAGE`; a refused file is named in
+  `lib/outbox.py` `resolve_attachments`). Only files inside `data/outgoing/` qualify (checked again at send time), capped by
+  `MAX_ATTACHMENT_BYTES` (per file and in total) and `MAX_ATTACHMENTS_PER_MESSAGE`; a refused file is named in
   the reply and a file that vanishes before sending makes the row `dead`.
 - **Discord switches** (all off by default; `threads`, `reaction_notices`,
   `edit_reroute`, `suppress_embeds`; `tool_streaming` is a per-channel override of
@@ -777,6 +777,7 @@ data/                                  # named volume
 ├── friction/weekly.md                 # 7-day friction summary
 ├── friction/YYYY-MM-DD.md             # nightly review: causes and drafted issues
 ├── outbox/outbox.db                   # durable Discord replies: retry + audit (6.1)
+├── outgoing/                          # the only folder an agent may attach files from
 ├── build-queue.db                     # build queue (when enabled)
 ├── discord-dead-letter.jsonl.migrated # 1.x dead letters, imported into the outbox and kept
 ├── operator-pause.json                # /pause holds, keyed by shard id
