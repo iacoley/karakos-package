@@ -201,3 +201,35 @@ def test_weekly_pass_honours_dry_run(store, monkeypatch):
     mc._entity_dedup_pass(store, stats, datetime(2026, 10, 18, tzinfo=timezone.utc), dry_run=True)
     assert stats["entity_dedup"]["live"] is False and stats["entity_dedup"]["merged"] == 0
     assert archived(store, b) is None
+
+
+# Prefix pairs Amos measured with the real bge-small: longer prefixes are not abbreviations.
+@pytest.mark.parametrize("a,b,cos", [
+    ("git", "github", 0.899), ("Ian Cole", "Ian Coley", 0.910), ("Marv", "Marvin", 0.720)])
+def test_long_prefixes_are_not_abbreviations(a, b, cos):
+    assert entity_dedup.verdict(a, b, cos) is None
+
+
+def test_abbreviation_needs_an_initial_and_an_exact_word():
+    v = entity_dedup.verdict
+    assert v("Ian Coley", "i coley", 0.7) == "abbrev"
+    assert v("Ian Coley", "ia c", 0.7) is None        # no exact word
+    assert v("Ian Coley", "ian col", 0.7) is None     # three letters is not an initial
+
+
+@pytest.mark.slow
+def test_real_model_keeps_prefix_pairs_apart(store, monkeypatch):
+    """Runs the real embedding model; skipped when it cannot load offline."""
+    monkeypatch.undo()
+    embed._reset()
+    fe = pytest.importorskip("fastembed")
+    try:
+        model = fe.TextEmbedding("BAAI/bge-small-en-v1.5")
+    except Exception as exc:  # no cached weights, no network
+        pytest.skip(f"real model unavailable: {exc}")
+    import numpy as np
+    pairs = [("git", "github"), ("Ian Cole", "Ian Coley"), ("Marv", "Marvin")]
+    for a, b in pairs:
+        va, vb = (np.asarray(x) for x in model.embed([a, b]))
+        cos = float(va @ vb / (np.linalg.norm(va) * np.linalg.norm(vb)))
+        assert entity_dedup.verdict(a, b, cos) in (None, "report"), (a, b, cos)

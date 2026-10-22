@@ -33,12 +33,18 @@ def _digits(toks) -> list:
 
 
 def _shortened(a, b) -> bool:
-    """Same number of words; at each position the words are equal or one is a
-    shortened form (a strict prefix) of the other, and at least one differs
-    ("ian c." against "Ian Coley")."""
+    """Same number of words; every word is equal or is a one- or two-letter
+    initial of the other's word ("c" for "coley"), at least one word differs and
+    at least one word matches exactly ("ian c." against "Ian Coley"). Longer
+    prefixes ("git"/"github", "Cole"/"Coley") are not abbreviations."""
     if len(a) != len(b) or a == b:
         return False
-    return all(x == y or x.startswith(y) or y.startswith(x) for x, y in zip(a, b))
+
+    def fits(x, y):
+        s, l = sorted((x, y), key=len)
+        return x == y or (len(s) <= 2 and l.startswith(s))
+
+    return all(fits(x, y) for x, y in zip(a, b)) and any(x == y for x, y in zip(a, b))
 
 
 def verdict(name_a, name_b, cosine, threshold=THRESHOLD):
