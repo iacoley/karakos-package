@@ -111,6 +111,9 @@ class FakeRole:
         self.id = role_id
 
 
+_MSG_IDS = __import__("itertools").count(1)
+
+
 class FakeMessage:
     def __init__(self, author_id, content="", bot=False, channel_id=GATED_CHANNEL,
                  mentions=(), replied_to=None, role_mentions=()):
@@ -121,6 +124,7 @@ class FakeMessage:
         self.role_mentions = list(role_mentions)
         self.reference = FakeRef(replied_to) if replied_to is not None else None
         self.guild = FakeGuild()
+        self.id = next(_MSG_IDS)
 
 
 MENTION_ONLY_CHANNEL = 8000
@@ -169,6 +173,7 @@ def adapter(relay, monkeypatch):
     a.http_session = None
     a.server_ids = {"42"}
     a.reply_gate = relay.ReplyGate()
+    a.channel_context = relay.channel_context.ChannelContext()
     a.guest_budget = relay.GuestBudget()
     a.routed = []
 

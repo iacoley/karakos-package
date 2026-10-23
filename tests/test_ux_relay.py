@@ -136,6 +136,7 @@ def setup(relay, tmp_path, monkeypatch):
         a.http_session = Http()
         a.server_ids = {"42"}
         a.reply_gate = relay.ReplyGate()
+        a.channel_context = relay.channel_context.ChannelContext()
         a.guest_budget = relay.GuestBudget()
         a.edits = []
 
