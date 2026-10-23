@@ -23,6 +23,7 @@ Tools:
   - resume_agent      POST /agents/{name}/resume      (self-scoped)
   - snapshot_persona  copy agents/<name>/persona/ and SYSTEM_PROMPT.md aside (self-scoped)
   - restore_persona   put a snapshot back; the current state is snapshotted first (self-scoped)
+  - diagnose          bin/self-diagnose.py, read-only whole-install checks
   - get_findings      data/health/summary.md
 
 Self-scoped tools (reload, reset, effort, pause, resume) let an agent act on
@@ -292,6 +293,25 @@ def tool_set_model(args: dict) -> dict:
     return _http("POST", f"/agents/{name}/model", {"model": model.strip()})
 
 
+def tool_diagnose(args: dict) -> dict:
+    """Read-only. Runs bin/self-diagnose.py's checks in this process."""
+    import importlib.util
+    path = WORKSPACE_ROOT / "bin" / "self-diagnose.py"
+    spec = importlib.util.spec_from_file_location("self_diagnose", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    sections = args.get("sections")
+    if sections is not None:
+        if not isinstance(sections, list) or not all(isinstance(s, str) for s in sections):
+            raise ValueError("sections must be a list of section names")
+        bad = [s for s in sections if s not in mod.SECTIONS]
+        if bad:
+            raise ValueError(f"unknown section(s): {', '.join(bad)} (choose from {', '.join(mod.SECTIONS)})")
+    findings = mod.diagnose(WORKSPACE_ROOT, sections or None)
+    return {"ok": not any(f["severity"] in ("warn", "critical") for f in findings),
+            "findings": findings}
+
+
 def tool_get_queue(args: dict) -> dict:
     name = _agent_name(args.get("name"))
     return _http("GET", f"/agents/{name}/queue")
@@ -434,6 +454,18 @@ TOOLS = [
                 "snapshot_id": {"type": "string", "description": "Snapshot id, e.g. 20260101T000000Z"},
             },
             "required": ["name", "snapshot_id"],
+        },
+    },
+    {
+        "name": "diagnose",
+        "description": "Read-only whole-install diagnosis: agent server health, outbox, findings, heartbeats, protected-path hook, disk, schema stamp, log errors, build-queue backlog and version drift. Returns a ranked list of findings (critical, warn, info). Optional sections limits the checks.",
+        "handler": tool_diagnose,
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "sections": {"type": "array", "items": {"type": "string"},
+                             "description": "Subset of: health, findings, heartbeats, hook, disk, schema, logs, buildqueue, version"},
+            },
         },
     },
     {
