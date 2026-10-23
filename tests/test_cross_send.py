@@ -75,13 +75,17 @@ def _parse(send):
 def test_registry_default_and_valid_block():
     reg = _parse({"channels": [OPS], "per_hour": 10})
     assert reg.agent("main").settings["send"] == {"channels": [OPS], "per_hour": 10}
-    assert _parse(None).agent("main").settings["send"] == {"channels": [], "per_hour": 20}
+    assert _parse(None).agent("main").settings["send"] == {
+        "channels": [], "per_hour": 20, "unlimited_channels": []}
     assert reg.legacy_view()["agents"]["main"]["send"]["channels"] == [OPS]
 
 
 @pytest.mark.parametrize("bad", [
     "yes", {"channels": "all"}, {"channels": ["general"]}, {"channels": [1]},
     {"per_hour": 0}, {"per_hour": 500}, {"per_hour": True},
+    {"channels": [OPS], "unlimited_channels": [OTHER]},   # not in channels
+    {"unlimited_channels": [OPS]},                        # channels empty
+    {"channels": [OPS], "unlimited_channels": "all"},
 ])
 def test_registry_rejects_a_bad_send_block(bad):
     with pytest.raises(registry.RegistryError) as e:
@@ -164,6 +168,38 @@ def test_rate_limit_and_bad_content(harness):
         return outs, bad, len(_rows(h))
     outs, bad, n = _scenario(harness, {"send": {"channels": [OPS], "per_hour": 2}}, steps)
     assert outs == [202, 202, 429] and bad == 400 and n == 2
+
+
+def test_exempt_channel_skips_the_limit_and_others_keep_it(harness):
+    async def steps(h, call):
+        ex = [(await call({"action": "send", "channel": OPS, "content": f"e{i}"}))[0]
+              for i in range(4)]
+        lim = [(await call({"action": "send", "channel": OTHER, "content": f"l{i}"}))[0]
+               for i in range(3)]
+        return ex, lim, len(_rows(h))
+    cfg = {"send": {"channels": [OPS, OTHER], "per_hour": 2, "unlimited_channels": [OPS]}}
+    ex, lim, n = _scenario(harness, cfg, steps)
+    assert ex == [202] * 4 and lim == [202, 202, 429] and n == 6
+
+
+def test_exempt_sends_do_not_use_up_the_limit(harness):
+    async def steps(h, call):
+        for i in range(5):
+            await call({"action": "send", "channel": OPS, "content": f"e{i}"})
+        return (await call({"action": "send", "channel": OTHER, "content": "x"}))[0]
+    cfg = {"send": {"channels": [OPS, OTHER], "per_hour": 1, "unlimited_channels": [OPS]}}
+    assert _scenario(harness, cfg, steps) == 202
+
+
+def test_parse_unlimited_never_widens_the_allowlist():
+    allowed = [OPS]
+    assert cs.parse_unlimited({"unlimited_channels": [OPS, OTHER, True]}, allowed) == [OPS]
+    assert cs.parse_unlimited({}, allowed) == [] and cs.parse_unlimited(None, allowed) == []
+
+
+def test_audit_line_marks_exempt_sends():
+    assert cs.audit_line("a", OPS, 3, "ob-1").endswith("outbox=ob-1")
+    assert cs.audit_line("a", OPS, 3, "ob-1", exempt=True).endswith("outbox=ob-1 exempt=1")
 
 
 def test_channels_action_lists_only_the_allowlist(harness):

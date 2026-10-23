@@ -14,6 +14,10 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `send.unlimited_channels` (agents.yaml): channels from `send.channels` that skip the per-agent send rate limit. Empty by default; an id not also in `send.channels` fails at config load; exempt sends still log an audit line, marked `exempt=1`.
+
 ## [2.4.0] - 2026-10-23
 
 ### Fixed

@@ -727,13 +727,16 @@ agents:
     send:
       channels: ["<channel-id>"]   # quoted Discord ids; only these may be used
       per_hour: 20                        # rolling hour, per agent (1 to 200)
+      unlimited_channels: []              # optional: ids from `channels` that skip the limit
 ```
 
 `send` with action `channels` lists what the agent may use; action `send` takes a
 `channel` (name from `channels.json`, or id) and `content` (up to 4000 characters)
 and queues an outbox row, so delivery survives outages like any reply. An unlisted
 channel and an unknown one get the same refusal. Over the limit the call fails with
-the wait time. `@everyone`, `@here` and role mentions are broken in the text and
+the wait time. Ids in `unlimited_channels` skip the limit; each must also be in
+`channels` (config load fails otherwise), so the exemption never widens the
+allowlist. The audit line of an exempt send carries `exempt=1`. `@everyone`, `@here` and role mentions are broken in the text and
 every message goes out with empty `allowed_mentions`, so nothing pings. Each send
 logs one line (agent, channel, length, outbox id; never the text). Code:
 `lib/cross_send.py`, `POST /send` in `bin/agent-server.py`.

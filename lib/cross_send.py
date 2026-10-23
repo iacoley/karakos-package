@@ -8,6 +8,7 @@ calls these and enqueues an outbox row.
     send:
       channels: ["1234567890"]    # ids the agent may post to
       per_hour: 20                # sends per rolling hour (default 20)
+      unlimited_channels: []      # ids from `channels` that skip the rate limit
 """
 import re
 from collections import deque
@@ -46,6 +47,22 @@ def parse_config(raw: Any) -> Tuple[List[str], int]:
     if isinstance(per, bool) or not isinstance(per, int) or not 1 <= per <= MAX_PER_HOUR:
         per = DEFAULT_PER_HOUR
     return ids, per
+
+
+def parse_unlimited(raw: Any, allowed: List[str]) -> List[str]:
+    """Ids from `send.unlimited_channels` that are also in `allowed`. The
+    exemption never widens the allowlist: an id that is not allowed is dropped
+    here (registry validation rejects it at load)."""
+    if not isinstance(raw, dict) or not isinstance(raw.get("unlimited_channels"), list):
+        return []
+    out: List[str] = []
+    for c in raw["unlimited_channels"]:
+        if isinstance(c, bool):
+            continue
+        c = str(c).strip()
+        if c in allowed and c not in out:
+            out.append(c)
+    return out
 
 
 def neutralise_mentions(text: str) -> str:
@@ -87,6 +104,9 @@ class RateLimiter:
         return True, 0.0
 
 
-def audit_line(agent: str, channel_id: str, chars: int, outbox_id: str) -> str:
-    """One log line per cross-channel send. Length only, never the text."""
-    return f"cross-channel send agent={agent} channel={channel_id} chars={chars} outbox={outbox_id}"
+def audit_line(agent: str, channel_id: str, chars: int, outbox_id: str,
+               exempt: bool = False) -> str:
+    """One log line per cross-channel send. Length only, never the text.
+    `exempt=1` marks a send that skipped the rate limit."""
+    line = f"cross-channel send agent={agent} channel={channel_id} chars={chars} outbox={outbox_id}"
+    return line + " exempt=1" if exempt else line

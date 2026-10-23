@@ -4281,7 +4281,9 @@ async def handle_send(request):
     if not shard:
         return web.json_response({"error": "unknown agent"}, status=400)
     agent = spec_of(shard).agent
-    allowed, per_hour = cross_send.parse_config((agent_config.get(agent) or {}).get("send"))
+    send_cfg = (agent_config.get(agent) or {}).get("send")
+    allowed, per_hour = cross_send.parse_config(send_cfg)
+    unlimited = cross_send.parse_unlimited(send_cfg, allowed)
     names = {str(c.get("id")): n for n, c in (channels_config.get("channels") or {}).items()
              if isinstance(c, dict)}
     if data.get("action") == "channels":
@@ -4301,7 +4303,9 @@ async def handle_send(request):
     conn = _outbox_store()
     if conn is None:
         return web.json_response({"error": "outbox unavailable"}, status=503)
-    allowed_now, wait = _send_limiter.allow(agent, per_hour, time.monotonic())
+    exempt = channel_id in unlimited
+    allowed_now, wait = (True, 0.0) if exempt else _send_limiter.allow(
+        agent, per_hour, time.monotonic())
     if not allowed_now:
         return web.json_response(
             {"error": f"rate limit: {per_hour} sends per hour; next slot in {int(wait) + 1} s"},
@@ -4311,7 +4315,7 @@ async def handle_send(request):
         content_sha=outbox_lib.content_sha(text),
         allowed_mentions=cross_send.NO_MENTIONS)
     _outbox_notify()
-    log.info(cross_send.audit_line(shard, channel_id, len(text), rid))
+    log.info(cross_send.audit_line(shard, channel_id, len(text), rid, exempt))
     return web.json_response({"queued": True, "outbox_id": rid, "channel_id": channel_id}, status=202)
 
 
