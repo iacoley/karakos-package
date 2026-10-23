@@ -32,6 +32,7 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Build-time calibration (#242): `bin/estimate.py` (`calibrate`, `show`, `for KIND --builds N`) reads finished builds from `data/build-queue.db` read-only and writes median and 80th-percentile minutes per kind to `data/estimates/calibration.json`. A kind with fewer than three finished builds is reported as too thin to quote, not guessed.
 - Procedure skills shipped with the package (#235 build B): `restart-and-recover`, `diag`,
   `estimate`, `worktree-setup` and `skill-author`, instruction-only `SKILL.md` files under
   `skills/`, listed and read with the `skill` tool. Package-neutral wording.
