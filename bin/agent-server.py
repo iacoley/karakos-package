@@ -2153,6 +2153,33 @@ async def ux_create_thread(agent: str, channel_id: str, message_id: Optional[str
     return None
 
 
+async def add_reaction(agent: str, channel_id: str, message_id: str, emoji_path: str) -> bool:
+    """Add `emoji_path` (already percent-encoded, see discord_ux.emoji_path) as
+    the agent's own reaction. Single attempt, one retry after a 429. Never
+    raises: a reaction is an acknowledgement, and losing one costs nothing."""
+    token = AGENT_TOKENS.get(agent) or (list(AGENT_TOKENS.values())[0] if AGENT_TOKENS else None)
+    if not token or not channel_id or channel_id == "0":
+        log.info(f"skip reaction (no token or channel) agent={agent}")
+        return False
+    url = (f"https://discord.com/api/v10/channels/{channel_id}/messages/"
+           f"{message_id}/reactions/{emoji_path}/@me")
+    try:
+        for attempt in (1, 2):
+            async with http_session.put(url, headers={"Authorization": f"Bot {token}"}) as resp:
+                if resp.status in (200, 204):
+                    return True
+                if resp.status == 429 and attempt == 1:
+                    wait = min(float((await resp.json()).get("retry_after", 1)), 5.0)
+                    await asyncio.sleep(wait)
+                    continue
+                log.warning(f"reaction by {agent} in {channel_id} failed: "
+                            f"{_discord_error_detail(resp.status, await resp.text())}")
+                return False
+    except Exception as e:
+        log.warning(f"reaction by {agent} in {channel_id} failed: {type(e).__name__}: {e}")
+    return False
+
+
 async def post_to_discord(agent: str, channel_id: str, content: str,
                           reply_to: Optional[str] = None,
                           dead_letter: bool = False,
@@ -2805,6 +2832,9 @@ async def crash_recovery():
         for msg in unposted:
             if not msg["response"] or not post_guard.post_decision(msg["response"])[0]:
                 continue
+            if (discord_ux.parse_react_reply(msg["response"])
+                    and ux_for_channel_id(msg["channel_id"]).reactions):
+                continue  # a reaction, never text
             poster = STATE.agent_of(msg["agent"])
             matched = None
             conn = _outbox_store()
@@ -4218,6 +4248,38 @@ def _hive_unknown_detail():
         {s.agent for s in effective_specs()} | {s.id for s in effective_specs()}))
 
 
+async def handle_react(request):
+    """POST /react {agent, emoji, channel_id?, message_id?}: the `react` action
+    of the discord tool. Channel and message default to the agent's active turn."""
+    if not _bearer_ok(request):
+        return web.json_response({"error": "Unauthorized"}, status=401)
+    try:
+        data = await request.json()
+    except Exception:
+        data = None
+    if not isinstance(data, dict):
+        return web.json_response({"error": "Invalid JSON"}, status=400)
+    shard = _hive_known(data.get("agent"))
+    if not shard:
+        return web.json_response({"error": "unknown agent"}, status=400)
+    emoji = discord_ux.emoji_path(data.get("emoji"))
+    if emoji is None:
+        return web.json_response(
+            {"error": "emoji must be a unicode emoji or name:id for a custom one"}, status=400)
+    turn = STATE.active_turns.get(shard)
+    channel_id = str(data.get("channel_id") or (turn.channel_id if turn else "") or "")
+    message_id = str(data.get("message_id") or "")
+    if not message_id and turn:
+        message_id = next((m for m in reversed(turn.message_ids) if str(m).isdigit()), "")
+    if not channel_id.isdigit() or not message_id.isdigit():
+        return web.json_response({"error": "no channel or message to react to"}, status=400)
+    if not ux_for_channel_id(channel_id).reactions:
+        return web.json_response({"error": f"reactions disabled for {channel_id}"}, status=403)
+    if not await add_reaction(shard, channel_id, message_id, emoji):
+        return web.json_response({"error": "Discord refused the reaction"}, status=502)
+    return web.json_response({"reacted": True, "channel_id": channel_id, "message_id": message_id})
+
+
 async def handle_hive_buzz(request):
     """POST /hive/buzz {from, to, message}: leave another shard a message."""
     if not _bearer_ok(request):
@@ -5154,6 +5216,7 @@ def create_app(with_lifecycle: bool = True) -> web.Application:
     app.router.add_post("/ask", handle_ask_create)
     app.router.add_get("/ask/{ask_id}", handle_ask_status)
     app.router.add_post("/ask/{ask_id}/answer", handle_ask_answer)
+    app.router.add_post("/react", handle_react)
     app.router.add_post("/hive/buzz", handle_hive_buzz)
     app.router.add_post("/hive/call", handle_hive_call_create)
     app.router.add_get("/hive/call/{call_id}", handle_hive_call_get)

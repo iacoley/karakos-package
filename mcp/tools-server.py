@@ -284,18 +284,26 @@ CORE_TOOLS = [
     },
     {
         "name": "discord",
-        "description": "Discord server read-only access. Actions: history (view messages), channels (list channels).",
+        "description": "Discord server access. Actions: history (view messages), channels (list channels), react (add an emoji reaction to a message; defaults to the message that started this turn; unavailable where reactions are switched off).",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["history", "channels"],
+                    "enum": ["history", "channels", "react"],
                     "description": "The action to perform"
                 },
                 "channel": {
                     "type": "string",
-                    "description": "Channel name or ID (required for history)"
+                    "description": "Channel name or ID (required for history; for react, default: this turn's channel)"
+                },
+                "message_id": {
+                    "type": "string",
+                    "description": "react: the message to react to (default: the message that started this turn)"
+                },
+                "emoji": {
+                    "type": "string",
+                    "description": "react: a unicode emoji, or name:id for a custom one"
                 },
                 "limit": {
                     "type": "integer",
@@ -1014,6 +1022,26 @@ def handle_core_tool(tool_name: str, args: dict) -> dict:
             if channels_path.exists():
                 return json.loads(channels_path.read_text())
             return {"channels": {}}
+        elif action == "react":
+            channel = args.get("channel")
+            channel_id = None
+            if channel:
+                channel_id = str(channel)
+                if not channel_id.isdigit():
+                    cfg_path = WORKSPACE / "config" / "channels.json"
+                    try:
+                        entry = (json.loads(cfg_path.read_text()).get("channels") or {}).get(channel_id)
+                    except (OSError, ValueError):
+                        entry = None
+                    channel_id = str(entry.get("id")) if isinstance(entry, dict) and entry.get("id") else None
+                    if channel_id is None:
+                        return {"error": f"Unknown channel: {channel}"}
+            status, body = agent_server_request("POST", "/react", {
+                "agent": KARAKOS_AGENT, "emoji": args.get("emoji"),
+                "channel_id": channel_id, "message_id": args.get("message_id")})
+            if status == 200:
+                return body
+            return {"error": body.get("error") or f"react failed (HTTP {status})"}
         elif action == "history":
             channel = args.get("channel", "general")
             limit = min(args.get("limit", 20), 50)
