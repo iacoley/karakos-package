@@ -118,3 +118,77 @@ def test_a_cause_seen_on_one_day_is_drafted_but_not_filed(ws):
     sent = []
     assert fr.file_issues(ws, causes, "o/r", True, post=lambda *a: sent.append(a)) == []
     assert sent == []
+
+
+# -- the friction MCP action (#237) -------------------------------------------
+
+def _seed(ws, n_days=2):
+    put(ws, [ev(ago=i % n_days) for i in range(4)])
+    return fr.group(fr.read_log(ws, 7))[0]["id"]
+
+
+def answer(text):
+    return lambda args: {"status": "answered", "answer": text}
+
+
+def test_recent_returns_rows_and_causes(ws):
+    _seed(ws)
+    r = fr.recent(ws, 7, limit=2)
+    assert r["events"] == 4 and len(r["recent"]) == 2 and r["causes"][0]["count"] == 4
+
+
+def test_propose_files_only_on_an_explicit_yes(ws):
+    cid = _seed(ws)
+    sent = []
+    post = lambda repo, t, b, tok: (sent.append(t), "https://x/1")[1]  # noqa: E731
+    no = fr.propose_issue(ws, cid, "o/r", answer(fr.OPTION_NO), post=post)
+    assert no["status"] == "not_filed" and sent == []
+    timeout = fr.propose_issue(ws, cid, "o/r", lambda a: {"status": "timeout"}, post=post)
+    assert timeout["status"] == "not_filed" and sent == []
+    yes = fr.propose_issue(ws, cid, "o/r", answer(fr.OPTION_FILE), post=post)
+    assert yes["status"] == "filed" and yes["url"] == "https://x/1" and len(sent) == 1
+    again = fr.propose_issue(ws, cid, "o/r", answer(fr.OPTION_FILE), post=post)
+    assert again["status"] == "already_filed" and len(sent) == 1
+
+
+def test_long_question_is_cut_and_says_so(ws):
+    cid = _seed(ws)
+    seen = []
+    long = lambda a: seen.append(a["question"]) or {"status": "answered", "answer": fr.OPTION_NO}  # noqa: E731
+    d = {"title": "T", "body": "x" * 5000}
+    q = fr._question("o/r", d)
+    assert len(q) == fr.QUESTION_MAX and q.endswith(fr.TRUNCATED_NOTE)
+    assert "cut" not in fr._question("o/r", {"title": "T", "body": "short"})
+    fr.propose_issue(ws, cid, "o/r", long)
+    assert len(seen[0]) <= fr.QUESTION_MAX
+
+
+def test_failed_filing_after_a_yes_returns_the_draft(ws):
+    cid = _seed(ws)
+
+    def boom(repo, t, b, tok):
+        raise RuntimeError("HTTP 403")
+    r = fr.propose_issue(ws, cid, "o/r", answer(fr.OPTION_FILE), post=boom)
+    assert r["status"] == "file_failed" and "403" in r["error"] and r["draft"]["title"]
+    assert fr.propose_issue(ws, cid, "o/r", answer(fr.OPTION_NO), post=boom)["status"] == "not_filed"
+
+
+def test_propose_refuses_one_day_causes_bad_repo_and_unknown_ids(ws):
+    cid = _seed(ws, n_days=1)
+    asked = []
+    ask = lambda a: asked.append(a) or {"status": "answered", "answer": fr.OPTION_FILE}  # noqa: E731
+    assert fr.propose_issue(ws, cid, "o/r", ask)["status"] == "too_early"
+    assert asked == []
+    with pytest.raises(ValueError):
+        fr.propose_issue(ws, cid, "not a repo", ask)
+    with pytest.raises(LookupError):
+        fr.propose_issue(ws, "deadbeef00", "o/r", ask)
+
+
+def test_friction_tool_is_registered_and_dispatches(ws, monkeypatch):
+    monkeypatch.setenv("WORKSPACE_ROOT", str(ws))
+    ts = import_script("tools-server", file_path=PACKAGE_ROOT / "mcp" / "tools-server.py")
+    assert any(t["name"] == "friction" for t in ts.CORE_TOOLS)
+    _seed(ws)
+    assert ts.handle_core_tool("friction", {"action": "recent"})["events"] == 4
+    assert "error" in ts.handle_core_tool("friction", {"action": "propose_issue", "cause": "x", "repo": "bad"})
