@@ -14,6 +14,8 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-10-23
+
 ### Fixed
 
 - `purge-data`: a `VACUUM` that cannot take its lock no longer turns committed tool-audit deletes into a reported 0 (#156). The hyphenated-agent-name half of #156 was already fixed on `develop` (`_summary_agent`, covered by `tests/test_purge.py`).
@@ -287,7 +289,8 @@ Initial release: an installable multi-agent household system — Discord
 integration, local dashboard, episodic memory, session persistence, cost
 tracking, and builder/reviewer agents behind guardrails.
 
-[Unreleased]: https://github.com/mcarmody/karakos-package/compare/v2.3.1...develop
+[Unreleased]: https://github.com/mcarmody/karakos-package/compare/v2.4.0...develop
+[2.4.0]: https://github.com/mcarmody/karakos-package/compare/v2.3.1...v2.4.0
 [2.3.1]: https://github.com/mcarmody/karakos-package/compare/v2.3.0...v2.3.1
 [2.3.0]: https://github.com/mcarmody/karakos-package/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/mcarmody/karakos-package/compare/v2.1.0...v2.2.0
