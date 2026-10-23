@@ -14,6 +14,10 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- `purge-data`: a `VACUUM` that cannot take its lock no longer turns committed tool-audit deletes into a reported 0 (#156). The hyphenated-agent-name half of #156 was already fixed on `develop` (`_summary_agent`, covered by `tests/test_purge.py`).
+
 ### Added
 
 - Agent emoji reactions (#285). A final reply of exactly `REACT: <emoji>` adds that reaction to the message that started the turn instead of posting text, and the `discord` tool gains a `react` action (`channel`, `message_id`, `emoji`). New `ux` key `reactions`, on by default, per-channel override; when off, `REACT:` posts as text and the tool action returns an error. Changes `bin/agent-server.py` (tier 1: `add_reaction` and the `/react` route only), `lib/turn_loop.py`, `lib/discord_ux.py`, `mcp/tools-server.py`, `agents/CORE.md`.

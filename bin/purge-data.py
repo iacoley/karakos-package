@@ -74,6 +74,7 @@ def purge_tool_audit() -> int:
     cutoff_date = datetime.now(timezone.utc) - timedelta(days=TOOL_AUDIT_RETENTION_DAYS)
     cutoff_str = cutoff_date.isoformat()
 
+    conn = None
     try:
         conn = sqlite3.connect(str(TOOL_AUDIT_DB))
         cursor = conn.execute(
@@ -82,18 +83,24 @@ def purge_tool_audit() -> int:
         )
         deleted = cursor.rowcount
         conn.commit()
-
-        # Run VACUUM to reclaim space
-        conn.execute("VACUUM")
-        conn.close()
-
-        if deleted:
-            log.info(f"Purged {deleted} tool audit records older than {TOOL_AUDIT_RETENTION_DAYS} days")
-        return deleted
-
     except sqlite3.Error as e:
         log.error(f"Failed to purge tool audit: {e}")
+        if conn is not None:
+            conn.close()
         return 0
+
+    if deleted:
+        log.info(f"Purged {deleted} tool audit records older than {TOOL_AUDIT_RETENTION_DAYS} days")
+
+    # VACUUM only reclaims space. The deletes are committed, so a lock it cannot
+    # take (another process has the database open) must not hide the count.
+    try:
+        conn.execute("VACUUM")
+    except sqlite3.Error as e:
+        log.warning(f"Tool audit VACUUM skipped ({deleted} record(s) already deleted): {e}")
+    finally:
+        conn.close()
+    return deleted
 
 
 _SUMMARY_TS_RE = re.compile(r"^(?P<agent>.+)-\d{4}-\d{2}-\d{2}-\d{6}$")
