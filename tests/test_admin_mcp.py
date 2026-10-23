@@ -64,7 +64,7 @@ def test_tools_list():
     assert tool_names == {
         "list_agents", "get_health", "reload_agent", "reset_agent", "create_agent",
         "get_usage", "get_cost", "tail_log", "set_effort", "set_model", "get_queue",
-        "snapshot_persona", "restore_persona",
+        "snapshot_persona", "restore_persona", "diagnose",
         "pause_agent", "resume_agent", "get_findings",
     }
 
@@ -366,3 +366,13 @@ def test_get_findings_missing_and_present(admin, monkeypatch, tmp_path):
     (tmp_path / "data" / "health").mkdir(parents=True)
     (tmp_path / "data" / "health" / "summary.md").write_text("all green\n")
     assert admin.tool_get_findings({}) == {"summary": "all green\n"}
+
+
+def test_diagnose_tool_runs_selected_sections_and_rejects_unknown(admin, tmp_path, monkeypatch):
+    monkeypatch.setattr(admin, "WORKSPACE_ROOT", PACKAGE_ROOT)
+    r = admin.tool_diagnose({"sections": ["version"]})
+    assert set(r) == {"ok", "findings"} and all(f["section"] == "version" for f in r["findings"])
+    with pytest.raises(ValueError):
+        admin.tool_diagnose({"sections": ["nope"]})
+    with pytest.raises(ValueError):
+        admin.tool_diagnose({"sections": "health"})
