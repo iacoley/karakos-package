@@ -1829,6 +1829,33 @@ def _discord_error_detail(status: Optional[int], body: str) -> str:
     return out
 
 
+MAX_OUTBOUND_ATTACHMENT_BYTES = int(os.environ.get("MAX_ATTACHMENT_BYTES", str(25 * 1024 * 1024)))
+MAX_OUTBOUND_ATTACHMENTS = int(os.environ.get("MAX_ATTACHMENTS_PER_MESSAGE", "10"))
+# Agents may attach only files they put in this folder, never the rest of data/
+# (which holds the message store and other state).
+OUTGOING_ATTACHMENT_DIR = WORKSPACE_ROOT / "data" / "outgoing"
+
+
+def _attachment_form(payload: Dict[str, Any], paths: List[str]) -> "aiohttp.FormData":
+    """Multipart body for a message with files: `payload_json` plus `files[n]`.
+
+    Files are read when the request is built, so a retry re-reads them; a path
+    that has gone missing raises FileNotFoundError (the sender treats that as
+    permanent).
+    """
+    form = aiohttp.FormData()
+    form.add_field("payload_json", json.dumps(payload), content_type="application/json")
+    total = 0
+    for n, path in enumerate(paths):
+        data = Path(path).read_bytes()
+        total += len(data)
+        if total > MAX_OUTBOUND_ATTACHMENT_BYTES:   # grew since it was checked
+            raise OSError("attachments grew past the size limit")
+        form.add_field(f"files[{n}]", data,
+                       filename=Path(path).name, content_type="application/octet-stream")
+    return form
+
+
 async def outbox_send_row(row: Dict[str, Any]) -> Optional[str]:
     """Send one claimed (`sending`) outbox row, from `chunks_done` onward.
 
@@ -1871,8 +1898,30 @@ async def outbox_send_row(row: Dict[str, Any]) -> Optional[str]:
         status: Optional[int] = None
         retry_after = None
         detail = ""
+        files_too_big = False
         try:
-            async with http_session.post(url, headers=headers, json=payload) as resp:
+            request_kwargs: Dict[str, Any] = {"json": payload}
+            files = json.loads(row.get("attachments") or "[]") if idx == 0 else []
+            if files:
+                payload["attachments"] = [{"id": n, "filename": Path(f).name}
+                                          for n, f in enumerate(files)]
+                try:
+                    # checked again now: the file may have been swapped or grown
+                    # (or a symlink planted) since the reply was queued
+                    files = outbox_lib.resolve_attachments(
+                        files, OUTGOING_ATTACHMENT_DIR, MAX_OUTBOUND_ATTACHMENT_BYTES,
+                        MAX_OUTBOUND_ATTACHMENTS)
+                    form = _attachment_form(payload, files)
+                except (OSError, outbox_lib.AttachmentError) as e:
+                    log.error(f"Discord outbox: attachment unreadable for {rid}: {e}")
+                    outbox_lib.record_failure(conn, rid, "permanent", None,
+                                              f"attachment unreadable: {type(e).__name__}",
+                                              None, _outbox_now())
+                    return None
+                # multipart sets its own Content-Type (with the boundary)
+                headers = {"Authorization": headers["Authorization"]}
+                request_kwargs = {"data": form}
+            async with http_session.post(url, headers=headers, **request_kwargs) as resp:
                 status = resp.status
                 if status in (200, 201):
                     data = await resp.json()
@@ -1898,10 +1947,33 @@ async def outbox_send_row(row: Dict[str, Any]) -> Optional[str]:
                     except Exception:
                         body = ""
                     detail = _discord_error_detail(status, body)
+                    files_too_big = status == 413 and bool(files)
         except asyncio.CancelledError:
             raise
         except Exception as e:
             status, detail = None, f"{type(e).__name__}: {str(e)[:100]}"
+        if files_too_big:
+            # Discord's bot upload limit is not fixed; do not lose the reply text with
+            # the files. Send this chunk once more without them, saying why.
+            log.warning(f"Discord outbox: files refused as too large for {rid}; sending text only")
+            note = "\n\n(files not sent: too large for Discord)"
+            text = chunks[idx] + note if len(chunks[idx]) + len(note) <= MAX_DISCORD_MSG_LEN \
+                else chunks[idx]
+            plain = {k: v for k, v in payload.items() if k != "attachments"}
+            plain["content"] = text
+            try:
+                async with http_session.post(url, headers=headers, json=plain) as resp2:
+                    if resp2.status in (200, 201):
+                        msg_id = str((await resp2.json()).get("id"))
+                        outbox_lib.record_chunk(conn, rid, msg_id, _outbox_now())
+                        ids.append(msg_id)
+                        continue
+                    status, detail = resp2.status, _discord_error_detail(
+                        resp2.status, await resp2.text())
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                status, detail = None, f"{type(e).__name__}: {str(e)[:100]}"
         kind = outbox_lib.classify(status)
         log.error(f"Discord outbox: chunk {idx + 1}/{len(chunks)} for {rid} failed ({detail})")
         outbox_lib.record_failure(conn, rid, kind, status, detail, retry_after, _outbox_now())
@@ -2112,6 +2184,20 @@ async def post_to_discord(agent: str, channel_id: str, content: str,
     if channel_id == "0":
         return None
 
+    # `[[attach: path]]` lines become file attachments on durable replies only.
+    attachments: List[str] = []
+    if dead_letter and "[[attach:" in (content or ""):
+        content, attachments, notes = outbox_lib.extract_attachments(
+            content, OUTGOING_ATTACHMENT_DIR, MAX_OUTBOUND_ATTACHMENT_BYTES,
+            MAX_OUTBOUND_ATTACHMENTS)
+        for note in notes:
+            log.warning(f"outbound attachment refused agent={agent}: {note}")
+        if notes:
+            content = (content + "\n\n" if content else "") + "\n".join(
+                f"(attachment not sent: {n})" for n in notes)
+        if attachments and not content.strip():
+            content = "Attached: " + ", ".join(Path(a).name for a in attachments)
+
     # Get agent's Discord token, fallback to primary agent
     token = AGENT_TOKENS.get(agent)
     prefix = ""
@@ -2150,7 +2236,8 @@ async def post_to_discord(agent: str, channel_id: str, content: str,
                     claimed=True,
                     now=_outbox_now(), content_sha=outbox_lib.content_sha(content),
                     chunks_total=len(chunks),
-                    queue_message_id=queue_message_id)
+                    queue_message_id=queue_message_id,
+                    attachments=attachments)
             except Exception as e:
                 _outbox_broken("enqueue", e)
             else:
