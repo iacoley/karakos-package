@@ -484,7 +484,7 @@ required. Keys, all optional: `model`, `effort` (`low`, `medium`, `high`,
 `token_budget_min_pause_s`, `context_budget_tokens`, `handoff_on_reset`,
 `reset_mode`, `prompt` (and the legacy `system_prompt`), `tool_streaming`,
 `stream_to_channel`, `dashboard_chat`, `allowed_tools`, `disallowed_tools`,
-`env`, `label`, `work_stealing`, `steering`, `shards` (each with its `channels`)
+`env`, `label`, `work_stealing`, `steering`, `send`, `shards` (each with its `channels`)
 and `discord` (`token_env`, `bot_id_env`, `role_id_env`). Unknown keys warn and are ignored.
 The server reads it at start and on reload; the relay re-reads it when the file
 changes.

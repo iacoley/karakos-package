@@ -37,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 # lib/ is a package root for lib.migrate (the schema-stamp guard).
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import ask_handler  # noqa: E402
+import cross_send  # noqa: E402
 import discord_ux  # noqa: E402
 import hive as hive_lib  # noqa: E402
 import msgqueue  # noqa: E402
@@ -1895,6 +1896,8 @@ async def outbox_send_row(row: Dict[str, Any]) -> Optional[str]:
             payload["message_reference"] = {"message_id": row["reply_to"]}
         if row.get("flags"):
             payload["flags"] = row["flags"]
+        if row.get("allowed_mentions"):
+            payload["allowed_mentions"] = json.loads(row["allowed_mentions"])
         status: Optional[int] = None
         retry_after = None
         detail = ""
@@ -4248,6 +4251,70 @@ def _hive_unknown_detail():
         {s.agent for s in effective_specs()} | {s.id for s in effective_specs()}))
 
 
+_send_limiter = cross_send.RateLimiter()
+
+
+def _send_resolve_channel(ref) -> Optional[str]:
+    """A channel id from a channels.json name or a bare id, else None."""
+    ref = str(ref or "").strip()
+    entry = (channels_config.get("channels") or {}).get(ref)
+    if isinstance(entry, dict) and entry.get("id"):
+        return str(entry["id"])
+    return ref if ref.isdigit() else None
+
+
+async def handle_send(request):
+    """POST /send {agent, action: "channels"|"send", channel?, content?}: the
+    `send` tool. Posts to a channel other than the turn's, only when the id is
+    in the agent's `send.channels` allowlist (empty by default). Rate limited
+    per agent; text is mention-neutralised and queued with empty
+    allowed_mentions. Delivery is the outbox's."""
+    if not _bearer_ok(request):
+        return web.json_response({"error": "Unauthorized"}, status=401)
+    try:
+        data = await request.json()
+    except Exception:
+        data = None
+    if not isinstance(data, dict):
+        return web.json_response({"error": "Invalid JSON"}, status=400)
+    shard = _hive_known(data.get("agent"))
+    if not shard:
+        return web.json_response({"error": "unknown agent"}, status=400)
+    agent = spec_of(shard).agent
+    allowed, per_hour = cross_send.parse_config((agent_config.get(agent) or {}).get("send"))
+    names = {str(c.get("id")): n for n, c in (channels_config.get("channels") or {}).items()
+             if isinstance(c, dict)}
+    if data.get("action") == "channels":
+        return web.json_response({"channels": [{"id": c, "name": names.get(c)} for c in allowed],
+                                  "per_hour": per_hour})
+    channel_id = _send_resolve_channel(data.get("channel"))
+    if channel_id is None or channel_id not in allowed:
+        # The same answer for an unknown channel and a forbidden one.
+        return web.json_response({"error": "channel not allowed for send"}, status=403)
+    problem = cross_send.check_content(data.get("content"))
+    if problem:
+        return web.json_response({"error": problem}, status=400)
+    text = cross_send.neutralise_mentions(data["content"])
+    ok, _ = post_guard.post_decision(text)
+    if not ok:
+        return web.json_response({"error": "content is empty or not postable"}, status=400)
+    conn = _outbox_store()
+    if conn is None:
+        return web.json_response({"error": "outbox unavailable"}, status=503)
+    allowed_now, wait = _send_limiter.allow(agent, per_hour, time.monotonic())
+    if not allowed_now:
+        return web.json_response(
+            {"error": f"rate limit: {per_hour} sends per hour; next slot in {int(wait) + 1} s"},
+            status=429)
+    rid, _claimed = outbox_lib.enqueue(
+        conn, shard, channel_id, text, now=_outbox_now(),
+        content_sha=outbox_lib.content_sha(text),
+        allowed_mentions=cross_send.NO_MENTIONS)
+    _outbox_notify()
+    log.info(cross_send.audit_line(shard, channel_id, len(text), rid))
+    return web.json_response({"queued": True, "outbox_id": rid, "channel_id": channel_id}, status=202)
+
+
 async def handle_react(request):
     """POST /react {agent, emoji, channel_id?, message_id?}: the `react` action
     of the discord tool. Channel and message default to the agent's active turn."""
@@ -5217,6 +5284,7 @@ def create_app(with_lifecycle: bool = True) -> web.Application:
     app.router.add_get("/ask/{ask_id}", handle_ask_status)
     app.router.add_post("/ask/{ask_id}/answer", handle_ask_answer)
     app.router.add_post("/react", handle_react)
+    app.router.add_post("/send", handle_send)
     app.router.add_post("/hive/buzz", handle_hive_buzz)
     app.router.add_post("/hive/call", handle_hive_call_create)
     app.router.add_get("/hive/call/{call_id}", handle_hive_call_get)

@@ -58,6 +58,7 @@ _DEFAULTS = {
     "label": None,
     "work_stealing": {"enabled": False, "after_s": 5, "max_rows": 5},
     "steering": {"enabled": True, "coalesce_ms": 300, "max_lines_per_turn": 8},
+    "send": {"channels": [], "per_hour": 20},   # cross-channel send (#278): off until channels are listed
 }
 _KNOWN_KEYS = {"name", "role", "shards", "discord"} | set(_DEFAULTS)
 
@@ -66,7 +67,7 @@ _LEGACY_PASSTHROUGH = (
     "system_prompt", "prompt", "model", "max_turns", "timeout", "tool_streaming",
     "stream_to_channel", "dashboard_chat", "allowed_tools", "disallowed_tools", "env",
     "label", "token_budget_4h", "token_budget_min_pause_s", "work_stealing",
-    "context_budget_tokens", "reset_mode", "steering", "effort",
+    "context_budget_tokens", "reset_mode", "steering", "effort", "send",
 )
 
 
@@ -185,6 +186,24 @@ def _check_type(aid, key, val, errors, warnings=None):
                 elif k not in ("enabled", "coalesce_ms", "max_lines_per_turn"):
                     if warnings is not None:
                         warnings.append(f"agent '{aid}': unknown key 'steering.{k}'")
+    elif key == "send":
+        if not isinstance(val, dict):
+            errors.append(f"{p} must be a mapping (channels, per_hour)")
+        else:
+            for k, v in val.items():
+                if k == "channels":
+                    ok = isinstance(v, list) and all(
+                        not isinstance(x, bool) and isinstance(x, (str, int))
+                        and str(x).strip().isdigit() and 15 <= len(str(x).strip()) <= 22
+                        for x in v)
+                    if not ok:
+                        errors.append(f"{p}.channels must be a list of Discord channel ids "
+                                      f"(quote them in YAML)")
+                elif k == "per_hour":
+                    if not (_is_int(v) and 1 <= v <= 200):
+                        errors.append(f"{p}.per_hour must be an integer from 1 to 200")
+                elif warnings is not None:
+                    warnings.append(f"agent '{aid}': unknown key 'send.{k}'")
     elif key in ("allowed_tools", "disallowed_tools") and not _is_str_list(val):
         errors.append(f"{p} must be a list of strings")
     elif key == "env" and not (isinstance(val, dict)

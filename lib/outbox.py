@@ -94,6 +94,7 @@ def open_store(path) -> sqlite3.Connection:
     conn.executescript(SCHEMA)
     ensure_column(conn, "outbox", "queue_message_id", "TEXT")
     ensure_column(conn, "outbox", "attachments", "TEXT DEFAULT '[]'")
+    ensure_column(conn, "outbox", "allowed_mentions", "TEXT")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_outbox_qmid ON outbox(queue_message_id)")
     conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
     try:
@@ -216,11 +217,12 @@ def _older_active(conn, agent, channel_id):
 
 def enqueue(conn, agent, channel_id, content, reply_to=None, flags=0, claimed=False,
             now=None, content_sha=None, chunks_total=None, queue_message_id=None,
-            attachments=None):
+            attachments=None, allowed_mentions=None):
     """Insert a row. `claimed` (inline owner) is honoured only when no older
     pending/sending row exists for (agent, channel). `attachments` is a list of
     already-validated file paths (see `resolve_attachments`), sent with the
-    first chunk. Returns (id, claimed)."""
+    first chunk. `allowed_mentions` (a dict, or None for Discord's default) is sent
+    with every chunk. Returns (id, claimed)."""
     now = _now(now)
     rid = "ob-" + uuid.uuid4().hex[:12]
     sha = content_sha or globals()["content_sha"](content)
@@ -230,11 +232,12 @@ def enqueue(conn, agent, channel_id, content, reply_to=None, flags=0, claimed=Fa
         conn.execute(
             "INSERT INTO outbox(id, created_at, updated_at, agent, channel_id, reply_to, content,"
             " flags, status, chunks_total, next_attempt_at, content_sha, queue_message_id,"
-            " attachments)"
-            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " attachments, allowed_mentions)"
+            " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (rid, now, now, agent, str(channel_id), reply_to, content, flags,
              "sending" if claimed else "pending", chunks_total, now, sha, queue_message_id,
-             json.dumps([str(a) for a in (attachments or [])])))
+             json.dumps([str(a) for a in (attachments or [])]),
+             json.dumps(allowed_mentions) if allowed_mentions is not None else None))
         _event(conn, rid, "enqueued", now, detail="claimed inline" if claimed else "queued")
         conn.execute("COMMIT")
     except BaseException:
