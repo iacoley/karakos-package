@@ -104,3 +104,60 @@ def test_ranked_worst_first_and_exit_codes(ws, capsys):
 def test_unknown_section_is_rejected(ws):
     with pytest.raises(SystemExit):
         sd.main(["--workspace", str(ws), "--sections", "bogus"])
+
+
+# -- build queue and version drift (#236 part 3) ------------------------------
+
+def _queue(ws, rows, enabled=True):
+    import sqlite3
+    (ws / "config").mkdir(exist_ok=True)
+    (ws / "config" / "build-queue.yaml").write_text(f"enabled: {'true' if enabled else 'false'}\n")
+    c = sqlite3.connect(ws / "data" / "build-queue.db")
+    c.execute("CREATE TABLE IF NOT EXISTS build_queue (id TEXT, status TEXT, created_at TEXT, not_before INTEGER)")
+    c.execute("DELETE FROM build_queue")
+    c.executemany("INSERT INTO build_queue VALUES (?,?,?,?)", [tuple(r) + (None,) * (4 - len(r)) for r in rows])
+    c.commit()
+    c.close()
+
+
+def test_buildqueue_off_or_empty_is_quiet(ws):
+    assert run(ws, ["buildqueue"]) == []
+    _queue(ws, [], enabled=False)
+    assert run(ws, ["buildqueue"]) == []
+    _queue(ws, [("a", "done", "2020-01-01T00:00:00Z")])
+    assert run(ws, ["buildqueue"]) == []
+
+
+def test_buildqueue_stuck_backlog_warns_running_one_is_info(ws):
+    _queue(ws, [("a", "queued", "2020-01-01T00:00:00Z")])
+    [f] = run(ws, ["buildqueue"])
+    assert f["severity"] == "warn" and "none running" in f["why"]
+    _queue(ws, [("a", "queued", "2020-01-01T00:00:00Z"), ("b", "running", "2020-01-01T00:00:00Z")])
+    assert run(ws, ["buildqueue"])[0]["severity"] == "info"
+
+
+def test_buildqueue_enabled_without_database_warns(ws):
+    (ws / "config").mkdir()
+    (ws / "config" / "build-queue.yaml").write_text("enabled: true\n")
+    assert run(ws, ["buildqueue"])[0]["severity"] == "warn"
+
+
+def test_buildqueue_held_rows_are_not_stuck(ws):
+    future = 4102444800  # year 2100
+    _queue(ws, [("a", "queued", "2020-01-01T00:00:00Z", future)])
+    [f] = run(ws, ["buildqueue"])
+    assert f["severity"] == "info" and "held" in f["why"]
+    _queue(ws, [("a", "queued", "2020-01-01T00:00:00Z", future), ("b", "queued", "2020-01-01T00:00:00Z")])
+    [f] = run(ws, ["buildqueue"])
+    assert f["severity"] == "warn" and "1 held" in f["why"]
+
+
+def test_version_quiet_unless_data_is_newer_than_code(ws):
+    assert run(ws, ["version"])[0]["why"].startswith("no VERSION")
+    (ws / "VERSION").write_text("2.3.1\n")
+    for pkg in ("2.3.1", "2.0.0"):  # a lagging stamp is normal: migrate hard-codes it
+        (ws / "data" / ".schema-version").write_text(json.dumps({"schema": 2, "package": pkg}))
+        assert run(ws, ["version"]) == []
+    (ws / "data" / ".schema-version").write_text(json.dumps({"schema": 2, "package": "2.4.0"}))
+    [f] = run(ws, ["version"])
+    assert f["severity"] == "warn" and "2.4.0" in f["why"]
