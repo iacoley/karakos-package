@@ -16,6 +16,7 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Agent emoji reactions (#285). A final reply of exactly `REACT: <emoji>` adds that reaction to the message that started the turn instead of posting text, and the `discord` tool gains a `react` action (`channel`, `message_id`, `emoji`). New `ux` key `reactions`, on by default, per-channel override; when off, `REACT:` posts as text and the tool action returns an error. Changes `bin/agent-server.py` (tier 1: `add_reaction` and the `/react` route only), `lib/turn_loop.py`, `lib/discord_ux.py`, `mcp/tools-server.py`, `agents/CORE.md`.
 - Entity dedup (build B of #238): `bin/graph-dedup.py` lists, and with `--live` merges (at most 50 per run), same-kind entities whose embeddings are nearly identical, using the soft `merge_entities`. The nightly `memory-consolidate` job runs it on Sundays when `MEMORY_ENTITY_DEDUP` is `report` or `live`; off by default. A pair also needs a second signal from the names (identical number tokens and the same number of words, plus a shared word, close spelling or an abbreviation; names with fewer words and ambiguous abbreviations are only listed for review), so dates and version numbers no longer merge; the weekly pass honours `dry_run` and scores in blocks.
 - Outbound Discord file attachments (#277). A durable reply can carry files: put
   `[[attach: path]]` on its own line and the outbox sends them with the first chunk

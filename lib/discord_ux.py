@@ -1,8 +1,9 @@
 """Optional Discord behaviours (step 6.2). Pure and stdlib only.
 
-Five switches, read from config/channels.json. Four are off by default; the
-fifth, `tool_streaming`, is a per-channel override of the agent's own setting
-(channel > agent `tool_streaming` in agents.yaml > default True):
+Six switches, read from config/channels.json. Four are off by default;
+`tool_streaming` is a per-channel override of the agent's own setting
+(channel > agent `tool_streaming` in agents.yaml > default True); `reactions`
+(the agent may answer with `REACT: <emoji>`) is on by default:
 
     {"ux": {"suppress_embeds": true},
      "channels": {"general": {"id": "...", "ux": {"threads": {"after_s": 60},
@@ -17,12 +18,16 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
+import re
+import urllib.parse
+
 import post_guard
 
 # Discord message flag 1 << 2. tests/test_discord_ux.py pins it to discord.py.
 SUPPRESS_EMBEDS = 4
 
-KEYS = ("threads", "reaction_notices", "edit_reroute", "suppress_embeds", "tool_streaming")
+KEYS = ("threads", "reaction_notices", "edit_reroute", "suppress_embeds", "tool_streaming",
+        "reactions")
 
 THREAD_AFTER_S = 60
 THREAD_MAX_LINES = 40
@@ -53,9 +58,7 @@ class ChannelUx:
     edit_reroute: Optional[EditCfg] = None
     suppress_embeds: bool = False
     tool_streaming: Optional[bool] = None       # None: inherit the agent's setting
-
-
-_UNSET = object()
+    reactions: bool = True                      # agent may react with an emoji (on by default)
 
 
 def _num(v, positive=True):
@@ -124,9 +127,13 @@ _PARSERS = {
     "edit_reroute": _parse_edit,
     "suppress_embeds": _parse_bool,
     "tool_streaming": _parse_tool_streaming,
+    "reactions": _parse_bool,
 }
+# What a bad value becomes, and what an unset key means. Every key is off when
+# unset except `reactions`, which is on by default; a bad value still turns it off.
 _OFF = {"threads": None, "reaction_notices": None, "edit_reroute": None,
-        "suppress_embeds": False, "tool_streaming": None}
+        "suppress_embeds": False, "tool_streaming": None, "reactions": False}
+_UNSET = {**_OFF, "reactions": True}
 
 
 def _parse_block(block, where: str, warnings: List[str]) -> Dict[str, Any]:
@@ -160,7 +167,7 @@ class UxConfig:
             if key in over:
                 vals[key] = over[key]
             else:
-                vals[key] = self._top.get(key, _OFF[key])
+                vals[key] = self._top.get(key, _UNSET[key])
         return ChannelUx(**vals)
 
     def any_on(self) -> bool:
@@ -349,3 +356,39 @@ def edit_decision(row, now, window_s, max_followups, followups,
     if len(followups or []) >= max_followups:
         return Decision("refused")
     return Decision("followup", phase)
+
+
+# --- Agent emoji reactions (#285) -------------------------------------------
+
+_REACT_RE = re.compile(r"\A\s*REACT:[ \t]*(\S+)\s*\Z")
+_CUSTOM_EMOJI_RE = re.compile(r"\A[A-Za-z0-9_]{2,32}:[0-9]{17,20}\Z")
+REACT_MAX_CHARS = 32
+
+
+def emoji_path(emoji) -> Optional[str]:
+    """`emoji` as the URL path segment Discord wants, or None if it is not one.
+
+    Accepts a unicode emoji (any short string with no ASCII letters or digits,
+    no whitespace) or a custom emoji as `name:id`. The result is percent-encoded.
+    """
+    if not isinstance(emoji, str):
+        return None
+    emoji = emoji.strip()
+    if not emoji or len(emoji) > REACT_MAX_CHARS or any(c.isspace() for c in emoji):
+        return None
+    if _CUSTOM_EMOJI_RE.match(emoji):
+        return urllib.parse.quote(emoji, safe=":")
+    if emoji.isascii() or (any(c.isascii() and c.isalnum() for c in emoji)
+                           and "\u20e3" not in emoji):   # keycap digits are fine
+        # Words, digits and ASCII punctuation are not emoji.
+        return None
+    return urllib.parse.quote(emoji, safe="")
+
+
+def parse_react_reply(text) -> Optional[str]:
+    """The emoji (as a URL path segment) when a final reply is exactly
+    `REACT: <emoji>`, else None. Anything else posts as text."""
+    if not isinstance(text, str):
+        return None
+    m = _REACT_RE.match(text)
+    return emoji_path(m.group(1)) if m else None

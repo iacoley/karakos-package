@@ -44,7 +44,7 @@ _SERVER_NAMES = (
     "agent_wall_strikes", "agent_hold_tasks", "agent_config",
     "db", "log", "ask_registry", "ux_threads",
     # collaborators
-    "post_to_discord", "start_typing", "stop_typing", "write_agent_beacon",
+    "post_to_discord", "add_reaction", "ux_for_channel_id", "start_typing", "stop_typing", "write_agent_beacon",
     "post_cost_update", "mark_session_started", "update_session_tokens", "update_session_context",
     "hold_batch", "agent_hold_until", "schedule_hold_wake", "classify_wall",
     "wall_not_before", "format_attachments", "redact_for_log",
@@ -1280,6 +1280,18 @@ async def run_turn(state: ServerState, shard: str, batch: TurnBatch,
                       metadata=metadata)
 
 
+async def react_to_trigger(state, agent: str, channel_id: str, message_ids: List[str],
+                           emoji_path: str) -> bool:
+    """Add the reaction for a `REACT:` reply to the turn's last real Discord
+    message. Synthetic ids (`reaction:`, `edit:`, hive and interrupt rows) have
+    no Discord message to react to: one INFO line, no request."""
+    target = next((m for m in reversed(message_ids) if str(m).isdigit()), None)
+    if target is None:
+        state.log.info(f"{agent} REACT skipped: no Discord message in {message_ids}")
+        return False
+    return await state.add_reaction(agent, channel_id, target, emoji_path)
+
+
 async def finish_turn(state: ServerState, shard: str, result: TurnResult):
     """Cost, wall check, hooks, Discord post, mark complete, redrain.
 
@@ -1354,7 +1366,13 @@ async def finish_turn(state: ServerState, shard: str, result: TurnResult):
 
     # Post response to Discord
     discord_msg_id = None
-    if response_text and channel_id != "0" and not result.suppress_post:
+    react_emoji = (discord_ux.parse_react_reply(response_text)
+                   if response_text and channel_id != "0" and not result.suppress_post
+                   and final_status == state.STATUS_COMPLETE else None)
+    if react_emoji and state.ux_for_channel_id(channel_id).reactions:
+        # `REACT: <emoji>` is a reaction on the triggering message, not a post.
+        await react_to_trigger(state, agent, channel_id, all_ids, react_emoji)
+    elif response_text and channel_id != "0" and not result.suppress_post:
         discord_msg_id = await state.post_to_discord(agent, channel_id, response_text,
                                                      dead_letter=True,
                                                      queue_message_id=(all_ids[0] if all_ids else None))

@@ -671,7 +671,9 @@ Hard delete is not an agent action. `taskboard.delete` tombstones a task with
   the reply and a file that vanishes before sending makes the row `dead`.
 - **Discord switches** (all off by default; `threads`, `reaction_notices`,
   `edit_reroute`, `suppress_embeds`; `tool_streaming` is a per-channel override of
-  the agent's setting): [DISCORD_SETUP.md](DISCORD_SETUP.md#optional-behaviours).
+  the agent's setting; `reactions` is on by default and lets an agent answer
+  `REACT: <emoji>` or use the `discord` tool's `react` action, `POST /react`):
+  [DISCORD_SETUP.md](DISCORD_SETUP.md#optional-behaviours).
 - **Pause and effort.** `/pause [minutes]` and `/resume` hold and release a
   shard's queue (`lib/operator_pause.py`, `data/operator-pause.json`; the turn in
   progress finishes). `/effort <level>` sets an agent-level `--effort` override
