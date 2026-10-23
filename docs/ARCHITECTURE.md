@@ -624,7 +624,7 @@ Embeddings of bare names rate unrelated things alike (two dates, two version
 numbers) and a name against a longer one that starts with it ("Mike" and "Mike
 Tyson"), and there is no unmerge, so a pair also needs a second signal from the
 names: identical number tokens, the same number of words, and either a shared
-word or close spelling, or words that differ only by shortening ("ian c." and
+word or close spelling, or words that differ only by shortening ("ian h." and
 "Ian Hartley") at a cosine of at least 0.6. An abbreviation that fits more than one
 entity merges none of them. Pairs where one name has fewer words, and ambiguous
 abbreviations, are listed for review and never merged. Scoring runs in blocks, so memory grows with the kind size times a
