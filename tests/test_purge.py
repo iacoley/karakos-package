@@ -190,6 +190,40 @@ class TestPurgeToolAudit:
         check.close()
         assert [r[0] for r in remaining] == [recent]
 
+    def test_locked_vacuum_still_reports_the_committed_deletes(self, tmp_workspace, monkeypatch):
+        """#156: VACUUM only reclaims space; a lock it cannot take must not turn
+        a committed delete into "0 purged"."""
+        purge, tools_server = self._modules(tmp_workspace, monkeypatch)
+        conn = tools_server.init_audit_db()
+        old = (datetime.now(timezone.utc) - timedelta(days=45)).isoformat()
+        conn.execute(
+            "INSERT INTO tool_calls (timestamp, tool_name, args_json, "
+            "result_size_bytes, duration_ms, success) VALUES (?, ?, ?, ?, ?, ?)",
+            (old, "sysmon", "{}", 10, 1.0, 1))
+        conn.commit()
+        conn.close()
+
+        real_connect = sqlite3.connect
+
+        class NoVacuum:
+            def __init__(self, conn):
+                self._c = conn
+
+            def execute(self, sql, *a):
+                if sql.strip().upper() == "VACUUM":
+                    raise sqlite3.OperationalError("database is locked")
+                return self._c.execute(sql, *a)
+
+            def __getattr__(self, name):
+                return getattr(self._c, name)
+
+        monkeypatch.setattr(purge.sqlite3, "connect", lambda *a, **k: NoVacuum(real_connect(*a, **k)))
+        assert purge.purge_tool_audit() == 1
+
+        check = real_connect(str(purge.TOOL_AUDIT_DB))
+        assert check.execute("SELECT COUNT(*) FROM tool_calls").fetchone()[0] == 0
+        check.close()
+
     def test_missing_database_is_not_an_error(self, tmp_workspace, monkeypatch):
         purge, _ = self._modules(tmp_workspace, monkeypatch)
         assert purge.purge_tool_audit() == 0
