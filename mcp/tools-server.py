@@ -314,6 +314,29 @@ CORE_TOOLS = [
         }
     },
     {
+        "name": "send",
+        "description": "Post a message to a Discord channel other than the one this turn came from. Off unless the operator lists the channel in your `send.channels` setting; you can only use channels shown by action `channels`. Rate limited. @everyone, @here and role mentions are neutralised and nothing pings. Actions: channels (list the channels you may post to), send (queue a message; delivery is asynchronous).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["channels", "send"],
+                    "description": "The action to perform"
+                },
+                "channel": {
+                    "type": "string",
+                    "description": "send: a channel name or id from `channels`"
+                },
+                "content": {
+                    "type": "string",
+                    "description": "send: the message text (up to 4000 characters)"
+                }
+            },
+            "required": ["action"]
+        }
+    },
+    {
         "name": "taskboard",
         "description": "Task and todo tracking. Actions: list (show tasks), add (create task), update (modify task), complete (mark done), delete (tombstone a task; hidden from list).",
         "inputSchema": {
@@ -1064,6 +1087,17 @@ def handle_core_tool(tool_name: str, args: dict) -> dict:
                 except json.JSONDecodeError:
                     continue
             return {"messages": messages[-limit:], "channel": channel}
+
+    elif tool_name == "send":
+        action = args.get("action")
+        if action not in ("channels", "send"):
+            return {"error": f"Unknown send action: {action}"}
+        status, body = agent_server_request("POST", "/send", {
+            "agent": KARAKOS_AGENT, "action": action,
+            "channel": args.get("channel"), "content": args.get("content")})
+        if status in (200, 202):
+            return body
+        return {"error": body.get("error") or f"send failed (HTTP {status})"}
 
     elif tool_name == "friction":
         from lib import friction_review as fr
