@@ -14,6 +14,11 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Entity dedup (build B of #238): `bin/graph-dedup.py` lists, and with `--live` merges (at most 50 per run), same-kind entities whose embeddings are nearly identical, using the soft `merge_entities`. The nightly `memory-consolidate` job runs it on Sundays when `MEMORY_ENTITY_DEDUP` is `report` or `live`; off by default. A pair also needs a second signal from the names (identical number tokens and the same number of words, plus a shared word, close spelling or an abbreviation; names with fewer words and ambiguous abbreviations are only listed for review), so dates and version numbers no longer merge; the weekly pass honours `dry_run` and scores in blocks.
+- Channel context for agents (#276): the relay prepends the messages that arrived in the channel since the agent's own last post there (`[context] Author (HH:MM): text`, oldest first, the triggering message excluded) to each delivered message. Channel-level `context_messages` sets how many: default 8, 0 to 20, 0 is off. In memory only (`lib/channel_context.py`); documented in `docs/DISCORD_SETUP.md`.
+
 ## [2.3.1] - 2026-10-21
 
 ### Fixed
@@ -27,6 +32,9 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - Build-time calibration (#242): `bin/estimate.py` (`calibrate`, `show`, `for KIND --builds N`) reads finished builds from `data/build-queue.db` read-only and writes median and 80th-percentile minutes per kind to `data/estimates/calibration.json`. A kind with fewer than three finished builds is reported as too thin to quote, not guessed.
+- Procedure skills shipped with the package (#235 build B): `restart-and-recover`, `diag`,
+  `estimate`, `worktree-setup` and `skill-author`, instruction-only `SKILL.md` files under
+  `skills/`, listed and read with the `skill` tool. Package-neutral wording.
 - Opt-in `"unlisted_channels": "mention_only"` in `config/channels.json`: an @mention of an agent now routes in a channel that is not listed, inside a configured server. Default `"ignore"` keeps the B24 refusal. Touches tier-1 `bin/relay.py`: maintainer review.
 - Persona and prompt rollback (#241): `snapshot_persona` and `restore_persona` admin MCP tools (`lib/persona_snapshots.py`) copy an agent's `persona/` and `SYSTEM_PROMPT.md` to `data/persona-snapshots/<name>/<id>/` (newest 10 kept). Taken automatically before `create_agent` overwrites a prompt and before a `reload_agent` that follows a persona change. A restore snapshots the current state first. Self-scoped like the other admin tools.
 - Runtime model switching (#233): `/model` slash command, `POST /agents/{name}/model` and a `set_model` admin MCP tool set an agent-level model override in `data/runtime-overrides.json`, applied at the next spawn (after the turn in flight, like `/effort`). Allowed ids are listed in the new `config/models.yaml` (aliases `opus`, `sonnet`, `haiku` by default), not in code; without that file only the agent's registry model is allowed. An agent may switch only its own model; the primary may switch any. Touches tier-1 `bin/agent-server.py` and `bin/relay.py`: maintainer review.

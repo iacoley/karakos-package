@@ -111,6 +111,7 @@ def adapter(relay, workspace):
     a.http_session = None
     a.server_ids = {"42"}
     a.reply_gate = relay.ReplyGate()
+    a.channel_context = relay.channel_context.ChannelContext()
     a.guest_budget = relay.GuestBudget()
     a.routed = []
 
@@ -206,6 +207,7 @@ def test_payload_posts_shard(relay, adapter):
     cls = relay.DiscordAdapter
     a = cls.__new__(cls)
     a.http_session = Sess()
+    a.channel_context = relay.channel_context.ChannelContext()
 
     async def noatt(m): return []
     async def noctx(m): return None

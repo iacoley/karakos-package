@@ -173,6 +173,22 @@ either: a shard that owns the channel still does not answer an unmentioned
 message. A channel that sets both `mention_only` and `reply_gate` logs an error
 at load and is treated as `mention_only`.
 
+**`context_messages`** — a channel-level key (not inside `reply_gate`; that one
+sizes the classifier's window and is separate). An agent's turn normally carries
+only the message that woke it, so in a `mention_only` channel "take this feedback"
+has nothing to point at. With this key the relay prepends the messages that
+arrived in the channel since the agent last posted there (other agents' posts
+included, the triggering message excluded), oldest first, one line each:
+`[context] Author (HH:MM): text`, times in UTC. The default is 8, the range 0 to
+20, and `0` delivers the bare message as before. Each message is cut to 300
+characters and the relay remembers the last 20 per channel, in memory only; when
+older messages were left out, the block ends its first line with a note telling
+the agent to call `discord` history for more.
+
+```json
+{ "channels": { "ops": { "mention_only": true, "context_messages": 12 } } }
+```
+
 **`unlisted_channels`** — a top-level key in `channels.json` for channels that are
 not listed in it. `"ignore"` (the default, also used when the key is absent) never
 routes an unlisted channel, even on an @mention. `"mention_only"` makes an unlisted

@@ -110,6 +110,7 @@ async def _send(relay, channel, guild, config_channels):
     """Run DiscordAdapter.send_to_agent_server on a bare instance and return
     the payload it posted to the agent server."""
     adapter = object.__new__(relay.DiscordAdapter)
+    adapter.channel_context = relay.channel_context.ChannelContext()
     adapter.http_session = _Session()
 
     async def no_attachments(message):
