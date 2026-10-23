@@ -779,6 +779,7 @@ data/                                  # named volume
 ├── outbox/outbox.db                   # durable Discord replies: retry + audit (6.1)
 ├── outgoing/                          # the only folder an agent may attach files from
 ├── build-queue.db                     # build queue (when enabled)
+├── estimates/calibration.json         # build-time medians per kind (bin/estimate.py calibrate)
 ├── discord-dead-letter.jsonl.migrated # 1.x dead letters, imported into the outbox and kept
 ├── operator-pause.json                # /pause holds, keyed by shard id
 ├── runtime-overrides.json             # /effort and /model overrides, keyed by agent id

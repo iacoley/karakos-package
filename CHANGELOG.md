@@ -23,6 +23,7 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   within `MAX_ATTACHMENT_BYTES` (also the cap on all files together) / `MAX_ATTACHMENTS_PER_MESSAGE`; files are checked again when sent; if Discord answers 413 the first chunk is retried once without the files and says so; a refused file is
   reported in the reply and the text still goes out. New `attachments` column on the
   outbox table, added in place by `open_store`.
+- `diagnose` tool in the `karakos-admin` MCP server (part 3 of #236) returns the `bin/self-diagnose.py` findings; two new sections, `buildqueue` (runnable builds queued with none running; builds held by `not_before` are ignored) and `version` (warns only when the data was stamped by a newer package than the code). Read-only.
 - Channel context for agents (#276): the relay prepends the messages that arrived in the channel since the agent's own last post there (`[context] Author (HH:MM): text`, oldest first, the triggering message excluded) to each delivered message. Channel-level `context_messages` sets how many: default 8, 0 to 20, 0 is off. In memory only (`lib/channel_context.py`); documented in `docs/DISCORD_SETUP.md`.
 
 ## [2.3.1] - 2026-10-21
@@ -37,6 +38,7 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Build-time calibration (#242): `bin/estimate.py` (`calibrate`, `show`, `for KIND --builds N`) reads finished builds from `data/build-queue.db` read-only and writes median and 80th-percentile minutes per kind to `data/estimates/calibration.json`. A kind with fewer than three finished builds is reported as too thin to quote, not guessed.
 - Procedure skills shipped with the package (#235 build B): `restart-and-recover`, `diag`,
   `estimate`, `worktree-setup` and `skill-author`, instruction-only `SKILL.md` files under
   `skills/`, listed and read with the `skill` tool. Package-neutral wording.
