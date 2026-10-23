@@ -34,9 +34,9 @@ def _digits(toks) -> list:
 
 def _shortened(a, b) -> bool:
     """Same number of words; every word is equal or is a one- or two-letter
-    initial of the other's word ("c" for "coley"), at least one word differs and
-    at least one word matches exactly ("ian c." against "Ian Coley"). Longer
-    prefixes ("git"/"github", "Cole"/"Coley") are not abbreviations."""
+    initial of the other's word ("h" for "hartley"), at least one word differs and
+    at least one word matches exactly ("ian h." against "Ian Hartley"). Longer
+    prefixes ("git"/"github", "Hart"/"Hartley") are not abbreviations."""
     if len(a) != len(b) or a == b:
         return False
 
@@ -104,7 +104,7 @@ def _scan(store, threshold):
                 v = verdict(a_["name"], b_["name"], score, threshold)
                 if v:
                     found.append((score, a_, b_, v))
-    # an abbreviation that fits two entities ("ian c." -> Ian Coley, Ian Cooper) is
+    # an abbreviation that fits two entities ("ian h." -> Ian Hartley, Ian Holloway) is
     # a guess: report it, merge neither
     partners = {}
     for _, a, b, v in found:

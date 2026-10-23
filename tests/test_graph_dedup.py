@@ -32,8 +32,8 @@ def archived(store, eid):
 
 
 def test_near_duplicates_pair_up_and_the_busier_one_survives(store):
-    a = ent(store, "Ian Coley", (1, 0), obs=3)
-    b = ent(store, "ian c.", (1, 0.05), obs=1)
+    a = ent(store, "Ian Hartley", (1, 0), obs=3)
+    b = ent(store, "ian h.", (1, 0.05), obs=1)
     ent(store, "Someone Else", (0, 1))
     [p] = entity_dedup.candidates(store)
     assert (p["from"], p["into"]) == (b, a) and p["score"] > 0.99
@@ -134,8 +134,8 @@ def test_unrelated_names_with_high_cosine_do_not_pair(store):
 
 
 def test_abbreviation_pairs_below_the_main_threshold_but_not_far_below(store):
-    ent(store, "Ian Coley", (1, 0))
-    ent(store, "ian c.", (0.72, 0.694))   # cosine 0.72, as measured
+    ent(store, "Ian Hartley", (1, 0))
+    ent(store, "ian h.", (0.72, 0.694))   # cosine 0.72, as measured
     assert len(entity_dedup.candidates(store)) == 1
     ent(store, "Dana Reyes", (1, 0), kind="other")
     ent(store, "dana r.", (0.3, 0.954), kind="other")   # cosine 0.3: too far
@@ -144,8 +144,8 @@ def test_abbreviation_pairs_below_the_main_threshold_but_not_far_below(store):
 
 def test_verdict_rules():
     v = entity_dedup.verdict
-    assert v("Ian Coley", "ian c.", 0.72) == "abbrev"
-    assert v("Ian Coley", "Bob Smith", 0.72) is None
+    assert v("Ian Hartley", "ian h.", 0.72) == "abbrev"
+    assert v("Ian Hartley", "Bob Smith", 0.72) is None
     assert v("", "x", 0.99) is None
     assert v("Delta Prime", "Delta Primes", 0.95) == "merge"
 
@@ -166,9 +166,9 @@ def test_fewer_words_is_reported_never_merged(store, a, b, cos):
 
 
 def test_an_abbreviation_that_fits_two_entities_merges_neither(store):
-    a = ent(store, "ian c.", (1, 0))
-    b = ent(store, "Ian Cooper", (0.795, 0.606))   # cosine 0.795 to "ian c.", as measured
-    d = ent(store, "Ian Coley", (0.795, -0.606))   # the two Ians stay far apart
+    a = ent(store, "ian h.", (1, 0))
+    b = ent(store, "Ian Holloway", (0.795, 0.606))   # cosine 0.795 to "ian h.", as measured
+    d = ent(store, "Ian Hartley", (0.795, -0.606))   # the two Ians stay far apart
     assert entity_dedup.candidates(store) == []
     assert {r["why"] for r in entity_dedup.report_only(store)} == {"ambiguous"}
     entity_dedup.run(store, live=True)
@@ -205,16 +205,16 @@ def test_weekly_pass_honours_dry_run(store, monkeypatch):
 
 # Prefix pairs Amos measured with the real bge-small: longer prefixes are not abbreviations.
 @pytest.mark.parametrize("a,b,cos", [
-    ("git", "github", 0.899), ("Ian Cole", "Ian Coley", 0.910), ("Marv", "Marvin", 0.720)])
+    ("git", "github", 0.899), ("Ian Hart", "Ian Hartley", 0.910), ("Marv", "Marvin", 0.720)])
 def test_long_prefixes_are_not_abbreviations(a, b, cos):
     assert entity_dedup.verdict(a, b, cos) is None
 
 
 def test_abbreviation_needs_an_initial_and_an_exact_word():
     v = entity_dedup.verdict
-    assert v("Ian Coley", "i coley", 0.7) == "abbrev"
-    assert v("Ian Coley", "ia c", 0.7) is None        # no exact word
-    assert v("Ian Coley", "ian col", 0.7) is None     # three letters is not an initial
+    assert v("Ian Hartley", "i hartley", 0.7) == "abbrev"
+    assert v("Ian Hartley", "ia h", 0.7) is None        # no exact word
+    assert v("Ian Hartley", "ian har", 0.7) is None     # three letters is not an initial
 
 
 @pytest.mark.slow
@@ -228,7 +228,7 @@ def test_real_model_keeps_prefix_pairs_apart(store, monkeypatch):
     except Exception as exc:  # no cached weights, no network
         pytest.skip(f"real model unavailable: {exc}")
     import numpy as np
-    pairs = [("git", "github"), ("Ian Cole", "Ian Coley"), ("Marv", "Marvin")]
+    pairs = [("git", "github"), ("Ian Hart", "Ian Hartley"), ("Marv", "Marvin")]
     for a, b in pairs:
         va, vb = (np.asarray(x) for x in model.embed([a, b]))
         cos = float(va @ vb / (np.linalg.norm(va) * np.linalg.norm(vb)))
