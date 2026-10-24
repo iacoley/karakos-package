@@ -8,7 +8,13 @@ cd "$WORKSPACE_ROOT"
 
 ENV_FILE="$WORKSPACE_ROOT/config/.env"
 [ -f "$ENV_FILE" ] || { echo "native-bootstrap: $ENV_FILE missing; run ./setup.sh --native first" >&2; exit 1; }
+_root="$WORKSPACE_ROOT"
 set -a; . "$ENV_FILE"; set +a
+# A .env carried over from a container install says WORKSPACE_ROOT=/workspace: the root
+# resolved above wins. Re-source paths.sh with it pinned.
+KARAKOS_HOME="$_root"
+source "$(dirname "${BASH_SOURCE[0]}")/lib/paths.sh"
+cd "$WORKSPACE_ROOT"
 [ -x "$WORKSPACE_ROOT/.venv/bin/python3" ] && export PATH="$WORKSPACE_ROOT/.venv/bin:$PATH"
 
 for var in DASHBOARD_PORT AGENT_SERVER_TOKEN; do
