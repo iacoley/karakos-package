@@ -13,7 +13,7 @@ This clones the release, runs the same wizard as the Docker path (`./setup.sh --
 which skips the Docker checks) and then `bin/native-install.sh`, which needs Python 3.11
 or newer, git, node and npm, the Claude CLI and a systemd user session. It creates
 `.venv`, builds the dashboard, runs `bin/native-bootstrap.sh` (the setup the container's
-entrypoint does: schema stamp, data and inbox directories, hooks, slash commands),
+entrypoint also runs, through the same script: schema stamp, data and inbox directories, hooks, slash commands),
 writes the units, enables linger and starts `karakos.target`. Re-running is safe.
 `--skip-dashboard` and `--no-start` are available on `bin/native-install.sh`.
 
