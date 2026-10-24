@@ -69,3 +69,16 @@ Units set `KARAKOS_HOME` and `WORKSPACE_ROOT` to the checkout and read
 The units set `PATH` at generate time: the venv's `bin`, the directory holding `claude`, then the `PATH` of the shell that ran the generator. Generation fails if `claude` is not found. Re-run the generator after moving or upgrading the CLI.
 
 `config/.env` is loaded as an `EnvironmentFile`, which overrides `Environment=` lines. To keep a stale `WORKSPACE_ROOT` in that file from winning, each `ExecStart` sets `WORKSPACE_ROOT` and `KARAKOS_HOME` through `env(1)`.
+
+## Moving from a container install
+
+Only `data/`, `logs/` and `inbox/` live in Docker named volumes; `config/`, `agents/` and `.karakos/` are bind mounts from the checkout, so the checkout you already have is the native one.
+
+```bash
+make down                        # the container must be stopped
+bin/native-migrate.sh --dry-run  # shows what it would copy
+bin/native-migrate.sh            # cp -a each volume into the checkout, drops WORKSPACE_ROOT from config/.env
+bin/native-bootstrap.sh
+```
+
+The script refuses to run while the container is up or when `data/`, `logs/` or `inbox/` already hold files. It never deletes the volumes (`config_karakos-data`, `config_karakos-logs`, `config_karakos-inbox` for the default project): keep them, and the stopped container, for a day on native before removing them. To roll back, start the container again.
