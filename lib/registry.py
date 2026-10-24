@@ -58,7 +58,7 @@ _DEFAULTS = {
     "label": None,
     "work_stealing": {"enabled": False, "after_s": 5, "max_rows": 5},
     "steering": {"enabled": True, "coalesce_ms": 300, "max_lines_per_turn": 8},
-    "send": {"channels": [], "per_hour": 20},   # cross-channel send (#278): off until channels are listed
+    "send": {"channels": [], "per_hour": 20, "unlimited_channels": []},   # cross-channel send (#278): off until channels are listed
 }
 _KNOWN_KEYS = {"name", "role", "shards", "discord"} | set(_DEFAULTS)
 
@@ -188,7 +188,7 @@ def _check_type(aid, key, val, errors, warnings=None):
                         warnings.append(f"agent '{aid}': unknown key 'steering.{k}'")
     elif key == "send":
         if not isinstance(val, dict):
-            errors.append(f"{p} must be a mapping (channels, per_hour)")
+            errors.append(f"{p} must be a mapping (channels, per_hour, unlimited_channels)")
         else:
             for k, v in val.items():
                 if k == "channels":
@@ -202,6 +202,16 @@ def _check_type(aid, key, val, errors, warnings=None):
                 elif k == "per_hour":
                     if not (_is_int(v) and 1 <= v <= 200):
                         errors.append(f"{p}.per_hour must be an integer from 1 to 200")
+                elif k == "unlimited_channels":
+                    ids = [str(x).strip() for x in v] if isinstance(v, list) else None
+                    chans = val.get("channels")
+                    listed = ([str(x).strip() for x in chans]
+                              if isinstance(chans, list) else [])
+                    if ids is None or any(isinstance(x, bool) for x in v):
+                        errors.append(f"{p}.unlimited_channels must be a list of channel ids")
+                    elif any(i not in listed for i in ids):
+                        errors.append(f"{p}.unlimited_channels may only list ids that are "
+                                      f"also in {p}.channels")
                 elif warnings is not None:
                     warnings.append(f"agent '{aid}': unknown key 'send.{k}'")
     elif key in ("allowed_tools", "disallowed_tools") and not _is_str_list(val):
