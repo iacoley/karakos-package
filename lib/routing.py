@@ -19,6 +19,17 @@ class Route:
     reason: str  # "mention" | "channel" | "primary_fallback" | "mention_unlisted"
 
 
+def parse_role_ids(raw):
+    """Role ids from an env value: one id, or several separated by commas or
+    spaces. Unset, empty or non-numeric parts are skipped (a bad part never
+    hides the good ones)."""
+    out = []
+    for part in str(raw or "").replace(",", " ").split():
+        if part.isdigit() and int(part) not in out:
+            out.append(int(part))
+    return out
+
+
 def route_message(registry, channel_name, mentioned_agent, is_bot,
                   channel_opt_out=False, parent_channel_name=None,
                   mention_only=False, unlisted_mentions=False) -> Optional[Route]:
