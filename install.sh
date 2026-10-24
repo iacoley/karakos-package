@@ -10,6 +10,9 @@
 # Unattended install (no prompts; see docs/answers.example.json):
 #   bash install.sh --answers answers.json    # or KARAKOS_ANSWERS=answers.json
 #   curl -fsSL .../install.sh | bash -s -- --answers answers.json
+#
+# Native install (no Docker; a dedicated host with systemd, see docs/NATIVE.md):
+#   bash install.sh --native
 
 set -euo pipefail
 
@@ -20,12 +23,14 @@ KARAKOS_REPO_URL="${KARAKOS_REPO_URL:-https://github.com/${KARAKOS_REPO}.git}"
 # default branch of the repo is `develop`, so name the branch rather than rely on it.
 KARAKOS_BRANCH="${KARAKOS_BRANCH:-main}"
 ANSWERS_FILE="${KARAKOS_ANSWERS:-}"
+NATIVE="${KARAKOS_NATIVE:-0}"
 
 while [ $# -gt 0 ]; do
     case "$1" in
         --answers)   ANSWERS_FILE="${2:?--answers needs a file}"; shift 2 ;;
         --answers=*) ANSWERS_FILE="${1#--answers=}"; shift ;;
-        -h|--help)   sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --native)    NATIVE=1; shift ;;
+        -h|--help)   sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "install.sh: unknown option $1" >&2; exit 2 ;;
     esac
 done
@@ -91,6 +96,7 @@ else
     log "Git found: $(git --version)"
 fi
 
+if [ "$NATIVE" != 1 ]; then
 # --- Docker ---
 if ! command -v docker &>/dev/null; then
     log "Installing Docker..."
@@ -128,6 +134,8 @@ if ! docker compose version &>/dev/null 2>&1; then
     exit 1
 fi
 log "Docker Compose available."
+
+fi
 
 # --- jq ---
 if ! command -v jq &>/dev/null; then
@@ -190,16 +198,19 @@ echo ""
 
 # Run setup with error handling
 setup_exit=0
-if [ -n "$ANSWERS_FILE" ]; then
-    ./setup.sh --answers "$ANSWERS_FILE" || setup_exit=$?
-else
-    ./setup.sh || setup_exit=$?
-fi
+SETUP_ARGS=()
+[ "$NATIVE" = 1 ] && SETUP_ARGS+=(--native)
+[ -n "$ANSWERS_FILE" ] && SETUP_ARGS+=(--answers "$ANSWERS_FILE")
+./setup.sh ${SETUP_ARGS[@]+"${SETUP_ARGS[@]}"} || setup_exit=$?
 
 if [ "$setup_exit" -eq 0 ]; then
     echo ""
     log "Installation complete."
-    echo -e "  Logs:  docker compose -f $INSTALL_DIR/config/docker-compose.yml logs -f"
+    if [ "$NATIVE" = 1 ]; then
+        echo -e "  Logs:  journalctl --user -u 'karakos-*' -f"
+    else
+        echo -e "  Logs:  docker compose -f $INSTALL_DIR/config/docker-compose.yml logs -f"
+    fi
     echo ""
 else
     err "Setup wizard failed or was cancelled (exit code $setup_exit)."

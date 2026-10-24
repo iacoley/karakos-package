@@ -1,12 +1,36 @@
 # Running Karakos natively (no Docker)
 
 For a dedicated host (a mini PC, a WSL distro) where the machine is already the
-boundary. Docker stays the default. This page covers the process layer; the
-installer and upgrade path land in the next parts of the native-mode work.
+boundary. Docker stays the default.
+
+## Install
+
+```bash
+bash install.sh --native
+```
+
+This clones the release, runs the same wizard as the Docker path (`./setup.sh --native`,
+which skips the Docker checks) and then `bin/native-install.sh`, which needs Python 3.11
+or newer, git, node and npm, the Claude CLI and a systemd user session. It creates
+`.venv`, builds the dashboard, runs `bin/native-bootstrap.sh` (the setup the container's
+entrypoint does: schema stamp, data and inbox directories, hooks, slash commands),
+writes the units, enables linger and starts `karakos.target`. Re-running is safe.
+`--skip-dashboard` and `--no-start` are available on `bin/native-install.sh`.
+
+## Upgrade
+
+```bash
+make upgrade-native                       # fast-forward the current branch
+KARAKOS_REF=v2.5.0 make upgrade-native    # or a tag
+```
+
+`bin/native-upgrade.sh` stops if tracked files have local changes, moves the checkout,
+refreshes the venv and dashboard, re-runs the bootstrap and restarts the units.
+Schema changes still go through `karakos migrate`; the bootstrap refuses data that needs it.
 
 ## What runs
 
-The same four programs as `config/supervisord.conf`: agent-server, relay,
+`install.sh --native` does this for you. The same four programs as `config/supervisord.conf`: agent-server, relay,
 dashboard, scheduler. `lib/native_units.py` writes one `systemd --user` unit for
 each, plus `karakos.target` to start them together:
 

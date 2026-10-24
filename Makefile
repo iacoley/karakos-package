@@ -1,4 +1,4 @@
-.PHONY: install preflight up down ps logs shell pull help
+.PHONY: install preflight up down ps logs shell pull upgrade-native help
 
 # The compose file lives in config/, not at the repo root, and its env file
 # sits beside it. Every target goes through these two flags so that `make`
@@ -36,6 +36,10 @@ shell:
 ## pull: Fetch a newer image without starting anything.
 pull:
 	$(COMPOSE) pull
+
+## upgrade-native: (native mode) fast-forward the checkout, refresh venv and dashboard, restart the units. KARAKOS_REF=vX.Y.Z picks a tag.
+upgrade-native:
+	./bin/native-upgrade.sh
 
 ## help: List available targets.
 help:
