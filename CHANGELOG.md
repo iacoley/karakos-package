@@ -29,6 +29,10 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `KARAKOS_REPLY_GATE_DEFAULT=off` restores opt-in for the relay.
   Upgrade: channels served by two or more agents (or with `guest_agents`) now run the reply gate with no config change. Messages that previously reached the channel's agent unaddressed now need an @mention, a reply to the agent, or a leading name. To keep the old behavior set `"reply_gate": false` on that channel, or set `KARAKOS_REPLY_GATE_DEFAULT=off` for the relay. Single-agent channels are unaffected.
 
+### Fixed
+
+- Resume crash-loop (karakos-127). After three fast deaths of a resumed spawn the agent server drops the stored session id and cold-starts the shard instead of crash-looping on a refused session. The streak resets on a slow death, a non-resume spawn, or clear_session.
+
 ## [2.4.0] - 2026-10-23
 
 ### Fixed

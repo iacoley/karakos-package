@@ -318,21 +318,36 @@ def test_crashloop_brake_is_per_shard(harness):
 
     async def scenario():
         async with h:
-            h.script(default={"text": "ok"}, rules=[
-                {"match": "boom", "agent": "^a-2$", "step": {"text": "x", "exit": True}}])
-            for i in range(4):
-                await h.send("a-2", "boom", channel_id="77")
-                await h.wait_for(
-                    lambda i=i: len([d for d in h.discord
-                                     if "restarted" in d["content"] or "is down" in d["content"]]) >= i + 1,
-                    timeout=10)
-                if i < 3:
-                    await h.wait_idle("a-2")
-            assert h.module.agent_states["a-2"] != "IDLE" or "a-2" not in h.module.agent_processes \
-                or h.module.agent_processes["a-2"].returncode is not None
-            assert any("a (a-2) is down" in d["content"] for d in h.discord)
-            await h.send("a", "alive?")
-            await h.wait_idle("a")
+            # This test is about the 4-exit crashloop brake, not resume. The first
+            # message marks a-2's session started, so every respawn would --resume
+            # and enter the resume fallback. Give each a-2 spawn a cold start: clear
+            # its stored session first (fresh id, not started), as a cold start does.
+            real_get_or_create = h.module.get_or_create_session
+
+            async def cold_session(agent):
+                if agent == "a-2":
+                    await h.module.clear_session(agent)
+                return await real_get_or_create(agent)
+
+            h.module.get_or_create_session = cold_session
+            try:
+                h.script(default={"text": "ok"}, rules=[
+                    {"match": "boom", "agent": "^a-2$", "step": {"text": "x", "exit": True}}])
+                for i in range(4):
+                    await h.send("a-2", "boom", channel_id="77")
+                    await h.wait_for(
+                        lambda i=i: len([d for d in h.discord
+                                         if "restarted" in d["content"] or "is down" in d["content"]]) >= i + 1,
+                        timeout=10)
+                    if i < 3:
+                        await h.wait_idle("a-2")
+                assert h.module.agent_states["a-2"] != "IDLE" or "a-2" not in h.module.agent_processes \
+                    or h.module.agent_processes["a-2"].returncode is not None
+                assert any("a (a-2) is down" in d["content"] for d in h.discord)
+                await h.send("a", "alive?")
+                await h.wait_idle("a")
+            finally:
+                h.module.get_or_create_session = real_get_or_create
 
     run(scenario())
     assert last_row(h, "a")["response"] == "ok"

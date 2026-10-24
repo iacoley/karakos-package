@@ -21,7 +21,7 @@ import time
 import uuid
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List, Any, Tuple
 from logging.handlers import RotatingFileHandler
 
 import aiohttp
@@ -223,6 +223,13 @@ respawn_watcher_tasks: Dict[str, asyncio.Task] = {}
 respawn_history: Dict[str, List[float]] = {}
 RESPAWN_WINDOW_SECONDS = 300
 RESPAWN_MAX_IN_WINDOW = 3
+# A resumed spawn that dies this fast, this many times in a row, means the CLI
+# refuses its session id: start a fresh session instead of crash-looping on it.
+RESUME_FAIL_GIVEUP = 3
+RESUME_FAST_DEATH_SECONDS = 120.0
+# shard -> (session_id, time.monotonic() at spawn) for a spawn that used --resume.
+resume_spawn_info: Dict[str, Tuple[str, float]] = {}
+resume_fail_streak: Dict[str, int] = {}
 # Agents whose subprocess is being ended on purpose — restart, reload,
 # interrupt, shutdown, or POST /kill. Lets the respawn watcher tell an
 # intentional kill from a crash. Set by kill_agent_subprocess before it
@@ -626,6 +633,8 @@ async def clear_session(agent: str):
     )
     await db.commit()
     agent_last_cost.pop(agent, None)
+    resume_fail_streak.pop(agent, None)
+    resume_spawn_info.pop(agent, None)
     log.info(f"Cleared session for {agent}, new ID: {session_id}")
 
 async def update_session_tokens(agent: str, input_tokens: int):
@@ -961,6 +970,10 @@ async def start_agent_subprocess(shard: str):
         agent_states[shard] = "IDLE"
         agent_sessions[shard] = session_id
         agent_spawn_ts[shard] = time.time()
+        if resume_session:
+            resume_spawn_info[shard] = (session_id, time.monotonic())
+        else:
+            resume_spawn_info.pop(shard, None)
         # A live process is by definition no longer deliberately dead. Clearing
         # here rather than in the kill paths keeps the flag correct for the one
         # kill that is *not* followed by a spawn — POST /kill, which is meant
@@ -1147,6 +1160,24 @@ async def respawn_watcher(shard: str, proc: asyncio.subprocess.Process):
                 (STATUS_CRASHED, shard, STATUS_IN_PROGRESS))
         except Exception as e:
             log.warning(f"hive crash mark for {shard} failed: {e}")
+
+        # Resume fallback. A resumed spawn that dies fast, repeatedly, is being
+        # refused its session id; after RESUME_FAIL_GIVEUP of those in a row,
+        # pin a fresh session rather than respawn into the same refusal. The
+        # crashloop brake below still bounds everything else.
+        info = resume_spawn_info.pop(shard, None)
+        if info and (time.monotonic() - info[1]) < RESUME_FAST_DEATH_SECONDS:
+            resume_fail_streak[shard] = resume_fail_streak.get(shard, 0) + 1
+        else:
+            resume_fail_streak.pop(shard, None)
+        if resume_fail_streak.get(shard, 0) >= RESUME_FAIL_GIVEUP:
+            stale_sid = info[0] if info else "unknown"
+            log.error(
+                f"resume of {stale_sid} refused {RESUME_FAIL_GIVEUP}x - starting a fresh session; "
+                f"prior transcript retained at ~/.claude/projects/*/{stale_sid}.jsonl")
+            await clear_session(shard)
+            resume_fail_streak.pop(shard, None)
+            respawn_history[shard] = []
 
         # Crashloop brake. A subprocess that dies immediately on spawn — bad
         # model name, missing MCP binary, unreadable settings file — would
