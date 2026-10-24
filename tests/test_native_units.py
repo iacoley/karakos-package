@@ -30,6 +30,8 @@ def test_render(tmp_path):
     assert f"ExecStart=/venv/bin/python {tmp_path}/bin/agent-server.py" in srv
     assert f"Environment=KARAKOS_HOME={tmp_path}" in srv
     assert "Restart=always" in srv and "TimeoutStopSec=45" in srv
+    assert "RestartSteps=8" in srv and "SyslogIdentifier=karakos-agent-server" in srv
+    assert "KillMode=mixed" in units["karakos-dashboard.service"]
     assert f"WorkingDirectory={tmp_path}/dashboard" in units["karakos-dashboard.service"]
     assert "karakos-relay.service" in units["karakos.target"]
     assert "$${DASHBOARD_PORT:-3000}" in units["karakos-dashboard.service"]  # systemd escape

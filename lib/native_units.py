@@ -12,12 +12,16 @@ import os
 import sys
 from pathlib import Path
 
-# name -> (command template, workdir relative to home, TimeoutStopSec)
+# name -> (command template, workdir relative to home, TimeoutStopSec, extra [Service] lines)
+# The dashboard's next-server is a child of the node process: KillMode=mixed and a
+# port sweep stop a restart crash-looping on EADDRINUSE while the child holds the port.
+_DASH_EXTRA = ("KillMode=mixed\n"
+               "ExecStartPre=-/bin/bash -c 'fuser -k \"$${DASHBOARD_PORT:-3000}/tcp\"'\n")
 PROGRAMS = {
-    "agent-server": ("{python} {home}/bin/agent-server.py", ".", 45),
-    "relay": ("{python} {home}/bin/relay.py", ".", 10),
-    "dashboard": ("/bin/bash -c 'exec npx next start -p $${{DASHBOARD_PORT:-3000}}'", "dashboard", 10),
-    "scheduler": ("{python} {home}/bin/scheduler.py", ".", 5),
+    "agent-server": ("{python} {home}/bin/agent-server.py", ".", 45, ""),
+    "relay": ("{python} {home}/bin/relay.py", ".", 10, ""),
+    "dashboard": ("/bin/bash -c 'exec npx next start -p $${{DASHBOARD_PORT:-3000}}'", "dashboard", 10, _DASH_EXTRA),
+    "scheduler": ("{python} {home}/bin/scheduler.py", ".", 5, ""),
 }
 
 TEMPLATE = """\
@@ -30,13 +34,21 @@ PartOf=karakos.target
 [Service]
 Type=simple
 WorkingDirectory={workdir}
+Environment=HOME={userhome}
 Environment=WORKSPACE_ROOT={home}
 Environment=KARAKOS_HOME={home}
 {envfile}ExecStart={command}
+# Restart=always, not on-failure: a clean return from main() is exit 0 and must
+# still restart, as supervisord's autorestart=true does. The backoff (systemd
+# 254+) keeps a hard-down dependency at boot from becoming a tight loop without
+# ever parking the unit in `failed`.
 Restart=always
 RestartSec=2
+RestartSteps=8
+RestartMaxDelaySec=300
 KillSignal=SIGTERM
 TimeoutStopSec={stop}
+{extra}SyslogIdentifier=karakos-{name}
 
 [Install]
 WantedBy=karakos.target
@@ -57,9 +69,10 @@ def render(home: str, python: str = "python3") -> dict[str, str]:
     env = Path(home) / "config" / ".env"
     envfile = f"EnvironmentFile=-{env}\n"
     units = {}
-    for name, (cmd, wd, stop) in PROGRAMS.items():
+    userhome = os.environ.get("HOME") or str(Path.home())
+    for name, (cmd, wd, stop, extra) in PROGRAMS.items():
         units[f"karakos-{name}.service"] = TEMPLATE.format(
-            name=name, home=home, envfile=envfile, stop=stop,
+            name=name, home=home, envfile=envfile, stop=stop, extra=extra, userhome=userhome,
             workdir=str(Path(home) / wd) if wd != "." else home,
             command=cmd.format(python=python, home=home))
     units["karakos.target"] = TARGET.format(
