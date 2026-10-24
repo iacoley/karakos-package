@@ -5,6 +5,8 @@
 #   ./setup.sh --answers FILE.json   unattended: same fields and checks, no prompts
 #                                    (KARAKOS_ANSWERS=FILE.json does the same;
 #                                    see docs/answers.example.json)
+#   ./setup.sh --native              no Docker: same wizard, then bin/native-install.sh
+#                                    (KARAKOS_NATIVE=1 does the same; see docs/NATIVE.md)
 #   ./setup.sh --clean               remove generated state and config
 
 set -euo pipefail
@@ -79,6 +81,7 @@ error() {
 check_prerequisites() {
     log "Checking prerequisites..."
 
+    if [ "$NATIVE" != 1 ]; then
     # Docker
     if ! command -v docker &> /dev/null; then
         error "Docker not found. Please install Docker:"
@@ -92,6 +95,7 @@ check_prerequisites() {
         error "Please install Docker Compose v2:"
         error "  https://docs.docker.com/compose/install/"
         exit 1
+    fi
     fi
 
     # Node.js / npm (for Claude CLI)
@@ -610,6 +614,14 @@ EOF
         read -p "$(echo -e ${GREEN}Ready to launch ${SYSTEM_NAME}? Press Enter to start...${NC})" < /dev/tty
     fi
     echo
+    if [ "$NATIVE" = 1 ]; then
+        log "Native install (no Docker): venv, dashboard, systemd user units..."
+        bash "$SCRIPT_DIR/bin/native-install.sh"
+        echo
+        echo "  Dashboard: http://localhost:${DASHBOARD_PORT:-3000} (login: admin / password above)"
+        echo "  Logs:      journalctl --user -u 'karakos-*' -f"
+        return 0
+    fi
     log "Pulling karakos image from GHCR (this can take a few minutes on first install)..."
     if ! docker compose -f "$DOCKER_COMPOSE" --env-file "$ENV_FILE" pull; then
         echo
@@ -636,6 +648,15 @@ EOF
     echo "  Check #signals in Discord for system startup"
     echo
 }
+
+# --native: no Docker. Same wizard and config/, then bin/native-install.sh.
+NATIVE=0
+[ "${KARAKOS_NATIVE:-}" = "1" ] && NATIVE=1
+_args=()
+for _a in "$@"; do
+    if [ "$_a" = "--native" ]; then NATIVE=1; else _args+=("$_a"); fi
+done
+set -- ${_args[@]+"${_args[@]}"}
 
 # Handle --answers FILE / --answers=FILE (KARAKOS_ANSWERS is the env spelling)
 case "${1:-}" in
