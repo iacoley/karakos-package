@@ -9,4 +9,4 @@ from lib import friction_review  # noqa: E402
 
 
 def run_scheduled() -> None:
-    friction_review.review(os.environ.get("WORKSPACE_ROOT", "/workspace"))
+    friction_review.review(os.environ.get("WORKSPACE_ROOT") or os.environ.get("KARAKOS_HOME") or os.path.abspath(os.path.join(__file__, "..", "..", "..")))

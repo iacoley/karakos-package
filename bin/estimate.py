@@ -23,7 +23,7 @@ from lib import estimate as est  # noqa: E402
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--workspace", default=os.environ.get("WORKSPACE_ROOT", "/workspace"))
+    ap.add_argument("--workspace", default=os.environ.get("WORKSPACE_ROOT") or os.environ.get("KARAKOS_HOME") or os.path.abspath(os.path.join(__file__, "..", "..")))
     ap.add_argument("--json", action="store_true")
     sub = ap.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("calibrate")

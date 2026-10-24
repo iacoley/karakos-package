@@ -19,7 +19,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-WORKSPACE = Path(os.environ.get("WORKSPACE_ROOT", "/workspace"))
+WORKSPACE = Path(os.environ.get("WORKSPACE_ROOT") or os.environ.get("KARAKOS_HOME") or os.path.abspath(os.path.join(__file__, "..", "..")))
 MESSAGES_DIR = WORKSPACE / "data" / "messages"
 # Must match mcp/tools-server.py:AUDIT_DB_PATH — that server is the only
 # writer, and this purge is the only reader. tests/test_purge.py asserts the

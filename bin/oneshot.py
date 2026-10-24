@@ -68,7 +68,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-WORKSPACE = Path(os.environ.get("WORKSPACE_ROOT", "/workspace"))
+WORKSPACE = Path(os.environ.get("WORKSPACE_ROOT") or os.environ.get("KARAKOS_HOME") or os.path.abspath(os.path.join(__file__, "..", "..")))
 
 SPOOL_SUFFIX = ".oneshot.json"
 MAX_COMMAND_LEN = 8192
@@ -79,7 +79,7 @@ def spool_dir() -> Path:
     override = os.environ.get("ONESHOT_SPOOL_DIR")
     if override:
         return Path(override)
-    return Path(os.environ.get("WORKSPACE_ROOT", "/workspace")) / "data" / "oneshot-spool"
+    return Path(os.environ.get("WORKSPACE_ROOT") or os.environ.get("KARAKOS_HOME") or os.path.abspath(os.path.join(__file__, "..", ".."))) / "data" / "oneshot-spool"
 
 
 def stale_after_seconds() -> int:
@@ -250,7 +250,7 @@ def poke_command(message: str, agent: str | None = None,
     This is what makes "remind me in 10 minutes" land as a message rather than
     as a log line no one reads.
     """
-    workspace = Path(os.environ.get("WORKSPACE_ROOT", "/workspace"))
+    workspace = Path(os.environ.get("WORKSPACE_ROOT") or os.environ.get("KARAKOS_HOME") or os.path.abspath(os.path.join(__file__, "..", "..")))
     parts = ["bash", str(workspace / "bin" / "poke.sh"), "--source", "scheduler"]
     if agent:
         parts += ["--agent", agent]
@@ -338,7 +338,7 @@ def cancel(labels: list[str], directory: Path | None = None) -> dict:
 # =============================================================================
 
 def _run(command: str) -> int:
-    workspace = Path(os.environ.get("WORKSPACE_ROOT", "/workspace"))
+    workspace = Path(os.environ.get("WORKSPACE_ROOT") or os.environ.get("KARAKOS_HOME") or os.path.abspath(os.path.join(__file__, "..", "..")))
     cwd = str(workspace) if workspace.is_dir() else None
     try:
         result = subprocess.run(

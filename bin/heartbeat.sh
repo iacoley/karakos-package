@@ -3,7 +3,7 @@
 
 set -euo pipefail
 
-WORKSPACE_ROOT="${WORKSPACE_ROOT:-/workspace}"
+WORKSPACE_ROOT="${WORKSPACE_ROOT:-${KARAKOS_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}}"
 AGENT="${1:-}"
 
 if [ -z "$AGENT" ]; then

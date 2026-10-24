@@ -486,7 +486,7 @@ def show(conn, rid, include_content=False):
 # --- CLI ------------------------------------------------------------------------
 
 def main(argv=None) -> int:
-    default = Path(os.environ.get("WORKSPACE_ROOT", "/workspace")) / "data" / "outbox" / "outbox.db"
+    default = Path(os.environ.get("WORKSPACE_ROOT") or os.environ.get("KARAKOS_HOME") or os.path.abspath(os.path.join(__file__, "..", ".."))) / "data" / "outbox" / "outbox.db"
     p = argparse.ArgumentParser(prog="outbox")
     p.add_argument("--db", default=str(default))
     sub = p.add_subparsers(dest="cmd", required=True)

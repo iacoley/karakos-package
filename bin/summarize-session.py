@@ -20,7 +20,7 @@ import time
 from pathlib import Path
 from datetime import datetime
 
-WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT", "/workspace"))
+WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT") or os.environ.get("KARAKOS_HOME") or os.path.abspath(os.path.join(__file__, "..", "..")))
 STREAM_LOG_DIR = WORKSPACE_ROOT / "logs" / "agent-streams"
 SUMMARY_DIR = WORKSPACE_ROOT / "logs" / "session-summaries"
 SUMMARY_FILE_TEMPLATE = WORKSPACE_ROOT / "data" / "last-session-summary-{agent}.md"

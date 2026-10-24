@@ -526,7 +526,7 @@ class GuestBudget:
 # Configuration
 # =============================================================================
 
-WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT", "/workspace"))
+WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT") or os.environ.get("KARAKOS_HOME") or os.path.abspath(os.path.join(__file__, "..", "..")))
 AGENTS_CONFIG_PATH = WORKSPACE_ROOT / "config" / "agents.yaml"
 CHANNELS_CONFIG_PATH = WORKSPACE_ROOT / "config" / "channels.json"
 MESSAGES_DIR = WORKSPACE_ROOT / "data" / "messages"

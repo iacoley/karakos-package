@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # repo root, for lib.graph
 from _handshake import initialize_result  # noqa: E402
 
-WORKSPACE = Path(os.environ.get("WORKSPACE_ROOT", "/workspace"))
+WORKSPACE = Path(os.environ.get("WORKSPACE_ROOT") or os.environ.get("KARAKOS_HOME") or os.path.abspath(os.path.join(__file__, "..", "..")))
 SKILLS_DIR = WORKSPACE / "skills"
 HEALTH_FILE = WORKSPACE / "data" / "health" / "mcp-tools.json"
 HEALTH_INTERVAL_S = 120

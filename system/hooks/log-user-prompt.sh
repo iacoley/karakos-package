@@ -9,7 +9,7 @@
 # off the same settings file.
 set -euo pipefail
 
-WORKSPACE_ROOT="${WORKSPACE_ROOT:-/workspace}"
+WORKSPACE_ROOT="${WORKSPACE_ROOT:-${KARAKOS_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}}"
 LOG_DIR="$WORKSPACE_ROOT/logs"
 mkdir -p "$LOG_DIR"
 

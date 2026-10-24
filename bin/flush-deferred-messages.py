@@ -33,7 +33,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT", "/workspace"))
+WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT") or os.environ.get("KARAKOS_HOME") or os.path.abspath(os.path.join(__file__, "..", "..")))
 DEFERRED_DIR = WORKSPACE_ROOT / "data" / "deferred-messages"
 AGENT_SERVER_PORT = os.environ.get("AGENT_SERVER_PORT", "18791")
 AGENT_SERVER_URL = os.environ.get(

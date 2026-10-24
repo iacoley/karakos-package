@@ -8,7 +8,7 @@
 
 set -euo pipefail
 
-WORKSPACE_ROOT="${WORKSPACE_ROOT:-/workspace}"
+WORKSPACE_ROOT="${WORKSPACE_ROOT:-${KARAKOS_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}}"
 AGENT_SERVER="http://127.0.0.1:${AGENT_SERVER_PORT:-18791}"
 AGENT_SERVER_TOKEN="${AGENT_SERVER_TOKEN:-}"
 

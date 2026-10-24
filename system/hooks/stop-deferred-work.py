@@ -43,7 +43,7 @@ import re
 import sys
 from pathlib import Path
 
-WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT", "/workspace"))
+WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT") or os.environ.get("KARAKOS_HOME") or os.path.abspath(os.path.join(__file__, "..", "..", "..")))
 COUNTER_FILE = WORKSPACE_ROOT / "data" / "stop-hook-extensions.json"
 MAX_EXTENSIONS = 2
 TAIL_CHARS = 500

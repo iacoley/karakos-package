@@ -62,7 +62,7 @@ from lib.migrate.guard import require_stamp  # noqa: E402
 # Configuration
 # =============================================================================
 
-WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT", "/workspace"))
+WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT") or os.environ.get("KARAKOS_HOME") or os.path.abspath(os.path.join(__file__, "..", "..")))
 PORT = int(os.environ.get("AGENT_SERVER_PORT", "18791"))
 DB_PATH = WORKSPACE_ROOT / "data" / "memory" / "agent-server.db"
 AGENTS_CONFIG_PATH = WORKSPACE_ROOT / "config" / "agents.yaml"

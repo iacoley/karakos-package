@@ -43,7 +43,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT", "/workspace"))
+WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT") or os.environ.get("KARAKOS_HOME") or os.path.abspath(os.path.join(__file__, "..", "..")))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 sys.path.insert(1, str(WORKSPACE_ROOT / "lib"))
 import stall  # noqa: E402

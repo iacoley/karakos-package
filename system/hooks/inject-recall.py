@@ -66,7 +66,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT", "/workspace"))
+WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT") or os.environ.get("KARAKOS_HOME") or os.path.abspath(os.path.join(__file__, "..", "..", "..")))
 
 # Must match AUTOMATED_TRAFFIC_SENTINEL in bin/agent-server.py exactly.
 AUTOMATED_TRAFFIC_SENTINEL = "[KARAKOS_AUTOMATED]"

@@ -150,4 +150,4 @@ def tick(workspace, now=None, send=None):
 
 
 def run():
-    tick(os.environ.get("WORKSPACE_ROOT", "/workspace"))
+    tick(os.environ.get("WORKSPACE_ROOT") or os.environ.get("KARAKOS_HOME") or os.path.abspath(os.path.join(__file__, "..", "..")))

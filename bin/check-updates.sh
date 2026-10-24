@@ -58,7 +58,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKSPACE_ROOT="${WORKSPACE_ROOT:-/workspace}"
+WORKSPACE_ROOT="${WORKSPACE_ROOT:-${KARAKOS_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}}"
 
 KARAKOS_REPO="${KARAKOS_REPO:-mcarmody/karakos-package}"
 RELEASES_URL="${KARAKOS_RELEASES_URL:-https://api.github.com/repos/${KARAKOS_REPO}/releases/latest}"

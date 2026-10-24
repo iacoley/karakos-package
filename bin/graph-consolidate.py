@@ -18,7 +18,7 @@ from lib.monitor_jobs import memory_consolidate  # noqa: E402
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--workspace", default=os.environ.get("WORKSPACE_ROOT", "/workspace"))
+    ap.add_argument("--workspace", default=os.environ.get("WORKSPACE_ROOT") or os.environ.get("KARAKOS_HOME") or os.path.abspath(os.path.join(__file__, "..", "..")))
     args = ap.parse_args(argv)
     try:
         stats = memory_consolidate.run_job({"workspace": args.workspace, "dry_run": args.dry_run})

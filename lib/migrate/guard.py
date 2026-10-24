@@ -88,7 +88,7 @@ def stamp_fresh(data_dir) -> bool:
 
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
-    default = os.path.join(os.environ.get("WORKSPACE_ROOT", "/workspace"), "data")
+    default = os.path.join(os.environ.get("WORKSPACE_ROOT") or os.environ.get("KARAKOS_HOME") or os.path.abspath(os.path.join(__file__, "..", "..", "..")), "data")
     if argv[:1] == ["check"]:
         require_stamp(argv[1] if len(argv) > 1 else default)
         return 0

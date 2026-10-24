@@ -17,7 +17,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 
-WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT", "/workspace"))
+WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT") or os.environ.get("KARAKOS_HOME") or os.path.abspath(os.path.join(__file__, "..", "..")))
 HEALTH_FILE = WORKSPACE_ROOT / "data" / "health" / "scheduler.json"
 
 # How often the loop wakes. Agent-scheduled oneshots are polled on every tick,

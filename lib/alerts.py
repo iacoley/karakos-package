@@ -95,7 +95,7 @@ def _log_failure(workspace, msg: str) -> None:
 
 def send(post, config=None, workspace=None) -> bool:
     """Run bin/discord-notify.sh directly. True only if it actually sent."""
-    ws = Path(workspace or os.environ.get("WORKSPACE_ROOT", "/workspace"))
+    ws = Path(workspace or os.environ.get("WORKSPACE_ROOT") or os.environ.get("KARAKOS_HOME") or os.path.abspath(os.path.join(__file__, "..", "..")))
     channel = post.get("channel") or ((config or {}).get("alerts", {}).get("channel", "signals"))
     notify = ws / "bin" / "discord-notify.sh"
     if not notify.exists():

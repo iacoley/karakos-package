@@ -13,7 +13,7 @@ from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from logging.handlers import RotatingFileHandler
 
-WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT", "/workspace"))
+WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT") or os.environ.get("KARAKOS_HOME") or os.path.abspath(os.path.join(__file__, "..", "..")))
 HEALTH_DIR = WORKSPACE_ROOT / "data" / "health"
 
 # Logging

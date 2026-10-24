@@ -16,7 +16,7 @@ import sys
 from fnmatch import fnmatch
 from pathlib import Path
 
-WORKSPACE = Path(os.environ.get("WORKSPACE_ROOT", "/workspace"))
+WORKSPACE = Path(os.environ.get("WORKSPACE_ROOT") or os.environ.get("KARAKOS_HOME") or os.path.abspath(os.path.join(__file__, "..", "..")))
 CONFIG_PATH = WORKSPACE / "config" / "protected-paths.json"
 EVENTS_LOG = WORKSPACE / "logs" / "git-events.jsonl"
 

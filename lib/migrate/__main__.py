@@ -30,7 +30,7 @@ def main(argv=None) -> int:
     p.add_argument("--report-to", metavar="FILE",
                    help="with --dry-run: write the report here (outside the install)")
     p.add_argument("--to-backup", metavar="DIR", help="restore a backup directory")
-    p.add_argument("--root", default=os.environ.get("WORKSPACE_ROOT", "/workspace"),
+    p.add_argument("--root", default=os.environ.get("WORKSPACE_ROOT") or os.environ.get("KARAKOS_HOME") or os.path.abspath(os.path.join(__file__, "..", "..", "..")),
                    help=argparse.SUPPRESS)
     a = p.parse_args(argv)
     root = Path(a.root)
