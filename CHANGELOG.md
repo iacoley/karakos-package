@@ -16,6 +16,7 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Native mode, part 2 (#303). `lib/native_units.py` generates `systemd --user` units for agent-server, relay, dashboard and scheduler from one template, with the restart policy and stop timeouts of `config/supervisord.conf` (a test keeps them in step), plus a `karakos.target` to start them together.
 - Native-mode install root (#303, part 1). Scripts under `bin/`, `lib/`, `mcp/` and `system/` resolve the install root from `KARAKOS_HOME`, then `WORKSPACE_ROOT`, then their own location, instead of defaulting to `/workspace`. The container is unchanged: it sets `WORKSPACE_ROOT` and the scripts sit at `/workspace`. A test fails on any new hardcoded `/workspace` default.
 - Agent process health (karakos-128). `/health` and `/agents` report each shard's `pid`, `uptime_seconds` and `last_turn_at`, and `/health` reads `degraded` when a shard's process is dead. The dashboard shows the new fields.
 - Message Content intent check (karakos-130). The relay logs one loud error per process when a message that mentions someone else arrives with empty text, the sign that the Discord Message Content intent is off. `docs/` explains how to tell and how to turn it on.
