@@ -513,6 +513,11 @@ MEMORY_MAX_EPISODES=15
 # Retention
 MESSAGE_RETENTION_DAYS=90
 EOF
+    # Native installs resolve the root from the checkout (lib/paths); a /workspace
+    # here would override it for everything that sources this file.
+    if [ "${NATIVE:-0}" = "1" ]; then
+        sed -i '/^WORKSPACE_ROOT=/d' "$ENV_FILE"
+    fi
     if [ -n "${CLAUDE_OAUTH_TOKEN:-}" ]; then
         printf '\n# Anthropic auth from the answers file (no browser login)\nCLAUDE_CODE_OAUTH_TOKEN=%s\n' \
             "$CLAUDE_OAUTH_TOKEN" >> "$ENV_FILE"

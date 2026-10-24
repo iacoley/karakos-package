@@ -63,3 +63,27 @@ def test_upgrade_refuses_outside_a_git_checkout(tmp_path):
     r = subprocess.run(["bash", str(ws / "bin" / "native-upgrade.sh")], capture_output=True, text=True,
                        env={"PATH": "/usr/bin:/bin", "KARAKOS_HOME": str(ws)})
     assert r.returncode == 1 and "not a git checkout" in r.stderr
+
+
+def test_bootstrap_ignores_workspace_root_in_env_file(tmp_path):
+    """A .env from a container install says /workspace; the checkout must win."""
+    ws = _ws(tmp_path / "ws")
+    (ws / "config").mkdir(exist_ok=True)
+    (ws / "config" / ".env").write_text(
+        "WORKSPACE_ROOT=/workspace\nDASHBOARD_PORT=3000\nAGENT_SERVER_TOKEN=x\n")
+    stub = tmp_path / "stub"
+    stub.mkdir()
+    log = tmp_path / "seen.log"
+    (stub / "python3").write_text(f'#!/bin/bash\necho "$WORKSPACE_ROOT|$KARAKOS_HOME|$PWD" >> {log}\necho main\n')
+    (stub / "python3").chmod(0o755)
+    r = subprocess.run(["bash", str(ws / "bin" / "native-bootstrap.sh")], capture_output=True, text=True,
+                       env={"PATH": f"{stub}:/usr/bin:/bin", "KARAKOS_HOME": str(ws), "HOME": str(tmp_path)})
+    seen = log.read_text().splitlines()
+    assert seen, r.stderr
+    for line in seen:
+        assert line == f"{ws}|{ws}|{ws}", (line, r.stderr)
+
+
+def test_setup_native_does_not_write_workspace_root():
+    text = (ROOT / "setup.sh").read_text()
+    assert "sed -i '/^WORKSPACE_ROOT=/d'" in text
