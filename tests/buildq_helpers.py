@@ -100,6 +100,7 @@ def make_workspace(tmp_path):
         (ws / "agents" / a / "SYSTEM_PROMPT.md").write_text(f"You are {a}.\n")
     for s in ("invoke-builder.sh", "invoke-reviewer.sh"):
         (ws / "bin" / s).symlink_to(ROOT / "bin" / s)
+    (ws / "bin" / "lib").symlink_to(ROOT / "bin" / "lib")
     poke = ws / "bin" / "poke.sh"
     poke.write_text('#!/bin/bash\nprintf "%s\\n" "$*" >> "$WORKSPACE_ROOT/poke.log"\n')
     poke.chmod(0o755)

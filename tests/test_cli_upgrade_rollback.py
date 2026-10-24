@@ -565,6 +565,8 @@ def test_the_selftest_would_fail_if_the_revert_stopped_happening(script, tmp_pat
         dest = tmp_path / src.name
         dest.write_text(src.read_text())
         dest.chmod(0o755)
+    (tmp_path / "lib").mkdir()
+    (tmp_path / "lib" / "paths.sh").write_text((UPGRADE.parent / "lib" / "paths.sh").read_text())
 
     victim = tmp_path / script.name
     old, new = SABOTAGE[script.name]

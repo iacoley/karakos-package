@@ -29,7 +29,7 @@ def main(argv=None):
     ap.add_argument("--file", action="store_true", help="file the drafts as issues")
     ap.add_argument("--repo", default="")
     ap.add_argument("--yes", action="store_true", help="the drafts were approved by a person")
-    ap.add_argument("--workspace", default=workspace_root())
+    ap.add_argument("--workspace", default=workspace_root(ROOT))
     a = ap.parse_args(argv)
     r = fr.review(a.workspace, a.days, a.min_count)
     out = {"report": r["report"], "events": r["events"], "causes": len(r["causes"])}

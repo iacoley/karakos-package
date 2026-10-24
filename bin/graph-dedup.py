@@ -28,7 +28,7 @@ def main(argv=None):
     ap.add_argument("--threshold", type=float, default=entity_dedup.THRESHOLD)
     ap.add_argument("--max", type=int, default=entity_dedup.MAX_MERGES, dest="cap")
     ap.add_argument("--json", action="store_true")
-    ap.add_argument("--workspace", default=workspace_root())
+    ap.add_argument("--workspace", default=workspace_root(ROOT))
     a = ap.parse_args(argv)
     if not 0.5 <= a.threshold <= 1.0:
         ap.error("--threshold must be between 0.5 and 1.0")

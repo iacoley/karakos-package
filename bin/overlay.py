@@ -25,7 +25,7 @@ NO_OVERLAY = "no overlay; run: python3 bin/overlay.py init"
 
 
 def workspace_of(args) -> Path:
-    return Path(args.workspace or workspace_root()).resolve()
+    return Path(args.workspace or workspace_root(PKG)).resolve()
 
 
 def _git(repo, *args, capture=True) -> subprocess.CompletedProcess:

@@ -23,7 +23,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--summary", action="store_true")
     ap.add_argument("--days", type=int, default=7)
-    ap.add_argument("--workspace", default=workspace_root())
+    ap.add_argument("--workspace", default=workspace_root(ROOT))
     a = ap.parse_args(argv)
     if a.summary:
         print(friction.summary_text(friction.read_log(a.workspace, a.days), a.days), end="")

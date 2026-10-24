@@ -11,9 +11,11 @@ from pathlib import Path
 _CHECKOUT = Path(__file__).resolve().parent.parent
 
 
-def workspace_root() -> str:
-    return os.environ.get("KARAKOS_HOME") or os.environ.get("WORKSPACE_ROOT") or str(_CHECKOUT)
+def workspace_root(default: str | os.PathLike | None = None) -> str:
+    """``default`` replaces the checkout fallback for callers that patch their own base."""
+    return (os.environ.get("KARAKOS_HOME") or os.environ.get("WORKSPACE_ROOT")
+            or str(default if default is not None else _CHECKOUT))
 
 
-def workspace_path() -> Path:
-    return Path(workspace_root())
+def workspace_path(default: str | os.PathLike | None = None) -> Path:
+    return Path(workspace_root(default))

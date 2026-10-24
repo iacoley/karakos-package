@@ -257,7 +257,7 @@ def _compose(brief, flags):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="buildq")
-    ap.add_argument("--workspace", default=workspace_root())
+    ap.add_argument("--workspace", default=workspace_root(PKG))
     ap.add_argument("--force", action="store_true", help="run even when the queue is disabled")
     ap.add_argument("--json", action="store_true", dest="as_json")
     common = argparse.ArgumentParser(add_help=False)
