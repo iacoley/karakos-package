@@ -39,3 +39,9 @@ Units set `KARAKOS_HOME` and `WORKSPACE_ROOT` to the checkout and read
 - **Reload-on-commit.** Do not port auto-restart-on-commit as is. The agent server
   must never be bounced by a commit it is delivering a reply for, and the relay
   needs to drain in-flight handlers on SIGTERM first. Tracked as a follow-up.
+
+## PATH and the install root
+
+The units set `PATH` at generate time: the venv's `bin`, the directory holding `claude`, then the `PATH` of the shell that ran the generator. Generation fails if `claude` is not found. Re-run the generator after moving or upgrading the CLI.
+
+`config/.env` is loaded as an `EnvironmentFile`, which overrides `Environment=` lines. To keep a stale `WORKSPACE_ROOT` in that file from winning, each `ExecStart` sets `WORKSPACE_ROOT` and `KARAKOS_HOME` through `env(1)`.

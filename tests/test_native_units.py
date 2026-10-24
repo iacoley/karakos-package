@@ -27,7 +27,10 @@ def test_render(tmp_path):
     units = native_units.render(str(tmp_path), "/venv/bin/python")
     assert set(units) == {f"karakos-{n}.service" for n in native_units.PROGRAMS} | {"karakos.target"}
     srv = units["karakos-agent-server.service"]
-    assert f"ExecStart=/venv/bin/python {tmp_path}/bin/agent-server.py" in srv
+    # env(1) sets the root so an EnvironmentFile (config/.env) cannot override it
+    assert (f"ExecStart=/usr/bin/env WORKSPACE_ROOT={tmp_path} KARAKOS_HOME={tmp_path} "
+            f"/venv/bin/python {tmp_path}/bin/agent-server.py") in srv
+    assert 'Environment="PATH=' in srv
     assert f"Environment=KARAKOS_HOME={tmp_path}" in srv
     assert "Restart=always" in srv and "TimeoutStopSec=45" in srv
     assert "RestartSteps=8" in srv and "SyslogIdentifier=karakos-agent-server" in srv
@@ -39,6 +42,24 @@ def test_render(tmp_path):
         assert not re.search(r"/workspace", text)
 
 
-def test_cli_writes_files(tmp_path):
+def test_cli_writes_files(tmp_path, monkeypatch):
+    monkeypatch.setattr(native_units.shutil, "which", lambda _n: "/opt/bin/claude")
     assert native_units.main(["--home", str(tmp_path), "--out", str(tmp_path / "u")]) == 0
     assert (tmp_path / "u" / "karakos.target").exists()
+
+
+def test_build_path_orders_venv_claude_then_base():
+    p = native_units.build_path("/v/bin/python", "/home/u/.local/bin/claude", "/usr/bin:/v/bin")
+    assert p == "/v/bin:/home/u/.local/bin:/usr/bin"
+
+
+def test_render_uses_given_path_and_escapes_percent(tmp_path):
+    srv = native_units.render(str(tmp_path), "/v/bin/python", "/v/bin:/a%b")["karakos-relay.service"]
+    assert 'Environment="PATH=/v/bin:/a%%b"' in srv
+
+
+def test_cli_fails_without_claude(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(native_units.shutil, "which", lambda _n: None)
+    assert native_units.main(["--home", str(tmp_path), "--out", str(tmp_path / "u")]) == 1
+    assert "claude" in capsys.readouterr().err
+    assert not (tmp_path / "u").exists()
