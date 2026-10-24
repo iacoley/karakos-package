@@ -129,6 +129,9 @@ class FakeMessage:
 
 MENTION_ONLY_CHANNEL = 8000
 BOTH_KEYS_CHANNEL = 8100
+DUO_CHANNEL = 9000       # amos + guest_agents (2 agents), no reply_gate key -> gated by default
+DUO_OFF = 9100           # 2 agents, "reply_gate": false
+DUO_MENTION_ONLY = 9200  # 2 agents, mention_only, no reply_gate key
 ROLE_ID = 777          # maps to amos
 UNMAPPED_ROLE_ID = 778
 
@@ -144,6 +147,11 @@ CHANNELS = {
                        "mention_only": True},
         "both-keys": {"id": str(BOTH_KEYS_CHANNEL), "default_agent": "amos",
                       "reply_gate": True, "mention_only": True},
+        "duo": {"id": str(DUO_CHANNEL), "default_agent": "amos", "guest_agents": True},
+        "duo-off": {"id": str(DUO_OFF), "default_agent": "amos", "guest_agents": True,
+                    "reply_gate": False},
+        "duo-mention": {"id": str(DUO_MENTION_ONLY), "default_agent": "amos",
+                        "guest_agents": True, "mention_only": True},
     },
 }
 
@@ -158,7 +166,8 @@ def adapter(relay, monkeypatch):
         "version": 2, "agents": {
             "amos": {"name": "amos", "role": "primary", "shards": [
                 {"id": "amos", "channels": ["kitchen", "general", "agent-chat",
-                                            "front-desk", "both-keys"]}]},
+                                            "front-desk", "both-keys", "duo", "duo-off",
+                                            "duo-mention"]}]},
             "kothar": {"name": "kothar", "role": "monitor"}}}))
     monkeypatch.setattr(relay, "discord_id_to_agent",
                         {AMOS_BOT_ID: "amos", KOTHAR_BOT_ID: "kothar"})
@@ -530,3 +539,81 @@ def test_role_id_env_is_read_from_the_registry_into_the_relay_map(relay, monkeyp
     relay.load_config()
 
     assert relay.discord_role_id_to_agent == {ROLE_ID: "amos"}
+
+
+# ---------------------------------------------------------------------------
+# #131 — the gate is on by default for channels with two or more agents
+# ---------------------------------------------------------------------------
+
+def test_two_agent_channel_is_gated_by_default(adapter):
+    deliver(adapter, FakeMessage(MIKE, "did you feed the cat", channel_id=DUO_CHANNEL))
+    deliver(adapter, FakeMessage(ALEX, "yeah this morning", channel_id=DUO_CHANNEL))
+    assert adapter.routed == []
+
+
+def test_two_agent_channel_mention_still_routes(adapter):
+    deliver(adapter, FakeMessage(MIKE, "<@111> what's on the calendar",
+                                 channel_id=DUO_CHANNEL, mentions=mention_amos()))
+    assert adapter.routed == [("amos", "<@111> what's on the calendar")]
+
+
+def test_explicit_false_opts_out(adapter):
+    deliver(adapter, FakeMessage(MIKE, "did you feed the cat", channel_id=DUO_OFF))
+    assert adapter.routed == [("amos", "did you feed the cat")]
+
+
+def test_single_agent_channel_not_gated_by_default(adapter):
+    deliver(adapter, FakeMessage(MIKE, "did you feed the cat", channel_id=PLAIN_CHANNEL))
+    assert adapter.routed == [("amos", "did you feed the cat")]
+
+
+def test_guest_agents_channel_counts_the_guest(relay, adapter):
+    cfg = CHANNELS["channels"]["agent-chat"]
+    assert relay.channel_agent_count("agent-chat", cfg) == 2
+    assert relay.channel_agent_count("general", CHANNELS["channels"]["general"]) == 1
+    assert relay.channel_agent_count(None, cfg) == 0
+
+
+def test_env_switch_restores_opt_in(adapter, monkeypatch):
+    monkeypatch.setenv("KARAKOS_REPLY_GATE_DEFAULT", "off")
+    deliver(adapter, FakeMessage(MIKE, "did you feed the cat", channel_id=DUO_CHANNEL))
+    assert adapter.routed == [("amos", "did you feed the cat")]
+
+
+def test_env_switch_leaves_explicit_true_alone(adapter, monkeypatch):
+    monkeypatch.setenv("KARAKOS_REPLY_GATE_DEFAULT", "off")
+    deliver(adapter, FakeMessage(MIKE, "did you feed the cat"))   # kitchen: reply_gate true
+    assert adapter.routed == []
+
+
+def test_possessive_name_is_not_a_trigger(adapter):
+    deliver(adapter, FakeMessage(MIKE, "amos's reply is slow", channel_id=DUO_CHANNEL))
+    deliver(adapter, FakeMessage(MIKE, "amos is investigating", channel_id=DUO_CHANNEL))
+    deliver(adapter, FakeMessage(MIKE, "amos already did that", channel_id=DUO_CHANNEL))
+    assert adapter.routed == []
+
+
+def test_vocative_name_engages(adapter):
+    deliver(adapter, FakeMessage(MIKE, "hey amos, add milk", channel_id=DUO_CHANNEL))
+    deliver(adapter, FakeMessage(MIKE, "amos", channel_id=DUO_CHANNEL))
+    assert adapter.routed == [("amos", "hey amos, add milk"), ("amos", "amos")]
+
+
+def test_mention_only_beats_default_gate(adapter, relay, monkeypatch):
+    errors = []
+
+    class Recorder:
+        def error(self, msg, *a, **k):
+            errors.append(msg % a if a else msg)
+
+        def __getattr__(self, name):
+            return lambda *a, **k: None
+
+    monkeypatch.setattr(relay, "log", Recorder())
+    deliver(adapter, FakeMessage(MIKE, "amos, add milk", channel_id=DUO_MENTION_ONLY))
+    deliver(adapter, FakeMessage(MIKE, "anyone want lunch", channel_id=DUO_MENTION_ONLY))
+    assert adapter.routed == []
+    deliver(adapter, FakeMessage(MIKE, "<@111> lunch?", channel_id=DUO_MENTION_ONLY,
+                                 mentions=mention_amos()))
+    assert adapter.routed == [("amos", "<@111> lunch?")]
+    assert errors == []

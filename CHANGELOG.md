@@ -14,6 +14,15 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- The reply gate is now on by default for channels served by two or more agents
+  (or with `guest_agents`), and a leading name engages an agent only when it is
+  a vocative (`amos, ...`, `hey amos!`, or the name alone), not "amos's reply
+  is slow" (#131). `"reply_gate": false` opts a channel out;
+  `KARAKOS_REPLY_GATE_DEFAULT=off` restores opt-in for the relay.
+  Upgrade: channels served by two or more agents (or with `guest_agents`) now run the reply gate with no config change. Messages that previously reached the channel's agent unaddressed now need an @mention, a reply to the agent, or a leading name. To keep the old behavior set `"reply_gate": false` on that channel, or set `KARAKOS_REPLY_GATE_DEFAULT=off` for the relay. Single-agent channels are unaffected.
+
 ## [2.4.0] - 2026-10-23
 
 ### Fixed

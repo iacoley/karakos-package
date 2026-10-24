@@ -130,12 +130,25 @@ also use to talk to other people. Two per-channel keys in
 }
 ```
 
-**`reply_gate`** — for channels shared with more than one human. The agent
-answers when it is @mentioned, when the message is a reply to something it
-said, or when the message opens with its name. It stays quiet otherwise,
+**`reply_gate`** — for channels shared with more than one human or agent. The
+agent answers when it is @mentioned, when the message is a reply to something
+it said, or when the message addresses it by name. It stays quiet otherwise,
 including when people are trading messages quickly. It is silence-biased on
 purpose: staying quiet costs you one word to recover from, and interrupting
-costs you the conversation. Omit the key and the channel behaves as before.
+costs you the conversation.
+
+*On by default.* A channel with no `reply_gate` key is gated when it has two or
+more agents (distinct agents whose shards list the channel, plus one if the
+channel sets `"guest_agents": true`). Set `"reply_gate": false` to opt a channel
+out, or `true` / an object to gate it regardless of agent count. Single-agent
+channels are not gated unless you ask. `"mention_only": true` wins over the gate.
+To restore opt-in behaviour for the whole relay, set
+`KARAKOS_REPLY_GATE_DEFAULT=off`.
+
+*A name is a hint, not a trigger.* A message engages the agent by name only when
+it is a vocative: the name (optionally after `hey`, `ok` or `okay`) followed by
+`,` `:` `!` `?` or `-`, or the name as the whole message. "amos, add milk" and
+"hey amos" engage; "amos's reply is slow" and "amos is investigating" do not.
 
 *Optional classifier tier (opt-in, silence on any doubt).* `"reply_gate": true`
 is heuristic only. Make it an object to let a small model (Haiku) decide the

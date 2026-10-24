@@ -221,3 +221,30 @@ def test_log_has_no_message_text(t2, caplog):
     gate_lines = [r.getMessage() for r in caplog.records if "[gate]" in r.getMessage()]
     assert gate_lines and all("secret" not in l for l in gate_lines)
     assert "silent (haiku silent)" in gate_lines[0]
+
+
+# ---------------------------------------------------------------------------
+# reply_gate_config.effective (#131)
+# ---------------------------------------------------------------------------
+
+def test_effective_default_on_for_two_agents(monkeypatch):
+    import reply_gate_config as cfg
+    monkeypatch.delenv("KARAKOS_REPLY_GATE_DEFAULT", raising=False)
+    assert cfg.effective(None, 2).enabled
+    assert not cfg.effective(None, 1).enabled
+    assert not cfg.effective(None, 0).enabled
+
+
+def test_effective_explicit_values_win(monkeypatch):
+    import reply_gate_config as cfg
+    monkeypatch.delenv("KARAKOS_REPLY_GATE_DEFAULT", raising=False)
+    assert not cfg.effective(False, 2).enabled
+    assert cfg.effective(True, 1).enabled
+    assert cfg.effective({"classifier": "haiku"}, 1).classifier == "haiku"
+
+
+def test_effective_env_off_restores_opt_in(monkeypatch):
+    import reply_gate_config as cfg
+    monkeypatch.setenv("KARAKOS_REPLY_GATE_DEFAULT", " OFF ")
+    assert not cfg.effective(None, 3).enabled
+    assert cfg.effective(True, 3).enabled

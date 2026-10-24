@@ -288,11 +288,13 @@ _NAME_OPENER_CACHE: Dict[str, "re.Pattern"] = {}
 
 
 def _name_opener(agent_name: str):
-    """`Amos, can you...` — a message that opens with the agent's name."""
+    """`Amos, can you...` — a message that opens by addressing the agent: the
+    name (optionally after hey/ok/okay) followed by `,` `:` `!` `?` or `-`, or
+    the name as the whole message. "amos's reply is slow" does not match."""
     key = (agent_name or "").lower()
     if key not in _NAME_OPENER_CACHE:
         _NAME_OPENER_CACHE[key] = re.compile(
-            r"^\s*(hey\s+|ok(?:ay)?\s+)?" + re.escape(key) + r"\b[\s,:!?]*", re.I
+            r"^\s*(hey\s+|ok(?:ay)?\s+)?" + re.escape(key) + r"(?:\s*[,:!?\-]|\s*$)", re.I
         )
     return _NAME_OPENER_CACHE[key]
 
@@ -300,16 +302,18 @@ def _name_opener(agent_name: str):
 class ReplyGate:
     """Decide whether a message in a shared human channel is addressed to us.
 
-    Only channels configured with `"reply_gate": true` are gated; everywhere
-    else behaviour is unchanged, so an install that never opts in sees exactly
-    what it saw before.
+    A channel is gated when `reply_gate` is set (true or an object), and by
+    default when the key is absent and the channel has two or more agents
+    (`"reply_gate": false` opts out; env KARAKOS_REPLY_GATE_DEFAULT=off turns
+    the default off). Single-agent channels are unchanged. See
+    lib/reply_gate_config.py `effective`.
 
     Two tiers, silence-biased:
 
       Tier 1, deterministic and always wins:
           @mention of one of our agents ....... ENGAGE
           reply to one of our agents' messages  ENGAGE
-          message opens with an agent's name .. ENGAGE
+          message addresses an agent by name .. ENGAGE (vocative only)
           reply to a different human .......... SILENT
 
       Volley: humans trading messages quickly are talking to each other, so
@@ -646,6 +650,16 @@ def load_config():
             log.error(f"channel '{name}' sets both mention_only and reply_gate; "
                       f"treating it as mention_only (reply_gate ignored)")
 
+    if os.environ.get(reply_gate_config.DEFAULT_ENV, "").strip().lower() != "off":
+        default_gated = [
+            name for name, cfg in (channels_config.get("channels") or {}).items()
+            if isinstance(cfg, dict) and "reply_gate" not in cfg
+            and cfg.get("mention_only") is not True
+            and channel_agent_count(name, cfg) >= 2
+        ]
+        if default_gated:
+            log.info("reply gate on by default for channels: %s", ", ".join(default_gated))
+
     unlisted = channels_config.get("unlisted_channels")
     if unlisted is not None and unlisted not in ("ignore", "mention_only"):
         log.error("unlisted_channels=%r is not supported (ignore, mention_only); using ignore", unlisted)
@@ -729,6 +743,18 @@ def default_agent_for(channel_name) -> Optional[str]:
         return None
     shard = registry_obj.shard_for_channel(channel_name)
     return shard.agent if shard else None
+
+
+def channel_agent_count(channel_name, channel_config) -> int:
+    """Distinct agents serving a channel: registry shards listing it, plus one
+    when the channel allows guest agents."""
+    if not channel_name or registry_obj is None:
+        return 0
+    agents = {s.agent for s in registry_obj.shards() if channel_name in s.channels}
+    count = len(agents)
+    if isinstance(channel_config, dict) and channel_config.get("guest_agents") is True:
+        count += 1
+    return count
 
 
 def unlisted_mentions_enabled() -> bool:
@@ -954,8 +980,9 @@ class DiscordAdapter(discord.Client):
                                       message.content, author_id=message.author.id)
             self.reply_gate.note_agent_post(message.channel.id)
             own_name, _ = self.resolve_channel(message.channel)
-            if own_name and ((channels_config.get("channels", {}).get(own_name) or {})
-                             .get("reply_gate")):
+            own_cfg = (channels_config.get("channels", {}).get(own_name) or {}) if own_name else {}
+            if own_name and reply_gate_config.effective(
+                    own_cfg.get("reply_gate"), channel_agent_count(own_name, own_cfg)).enabled:
                 self.reply_gate.note_message(
                     message.channel.id, message.author.display_name,
                     message.content, is_agent=True)
@@ -1031,9 +1058,10 @@ class DiscordAdapter(discord.Client):
             # A human spoke: the bot-to-bot budget refills.
             self.guest_budget.reset(message.channel.id)
 
-            raw_gate = channel_config.get("reply_gate")
-            if raw_gate and not mention_only:
-                gate_cfg = reply_gate_config.parse(raw_gate)
+            gate_cfg = reply_gate_config.effective(
+                channel_config.get("reply_gate"),
+                channel_agent_count(channel_name, channel_config))
+            if gate_cfg.enabled and not mention_only:
                 replied_to = None
                 ref = getattr(message, "reference", None)
                 resolved = getattr(ref, "resolved", None) if ref else None

@@ -8,6 +8,11 @@ that opts the channel into the classifier tier:
 
 An object without `classifier` is heuristic only. Bad values warn once and fall
 back to the default; nothing here raises.
+
+Default: with no `reply_gate` key, a channel served by two or more agents (or
+with `guest_agents`) is gated (heuristic only). `"reply_gate": false` opts a
+channel out; `KARAKOS_REPLY_GATE_DEFAULT=off` restores opt-in everywhere.
+Single-agent channels are never gated by default.
 """
 
 import logging
@@ -18,6 +23,7 @@ from typing import Optional
 log = logging.getLogger("reply_gate_config")
 
 KILL_SWITCH_ENV = "KARAKOS_REPLY_CLASSIFIER"
+DEFAULT_ENV = "KARAKOS_REPLY_GATE_DEFAULT"
 CLASSIFIERS = ("haiku",)
 
 # key -> (default, low, high, integer?)
@@ -84,3 +90,15 @@ def parse(value) -> GateConfig:
         classifier=classifier,
         **{name: _bounded(name, value.get(name)) for name in _BOUNDS},
     )
+
+
+def effective(value, agent_count: int) -> GateConfig:
+    """The gate for a channel: `value` is its `reply_gate` key (None = absent),
+    `agent_count` the number of agents in the channel. An absent key turns the
+    gate on for channels with two or more agents, unless the env switch says
+    off. An explicit value (including `false`) is parsed as written."""
+    if value is None:
+        if agent_count >= 2 and os.environ.get(DEFAULT_ENV, "").strip().lower() != "off":
+            return GateConfig(enabled=True)
+        return GateConfig()
+    return parse(value)
