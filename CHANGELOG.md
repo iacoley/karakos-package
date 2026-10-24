@@ -14,6 +14,10 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Startup dirty-tree report (karakos-132). When the workspace is a git repo with uncommitted files, the agent server logs a WARNING at startup naming up to 20 of them, and says a crash is likely when `crash_recovery` found stuck messages. Skipped silently without a `.git` directory; never blocks startup. New `lib/workspace_dirty.py`. `crash_recovery()` now returns the stuck-message count.
+
 ### Changed
 
 - The reply gate is now on by default for channels served by two or more agents

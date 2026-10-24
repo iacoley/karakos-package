@@ -2891,6 +2891,8 @@ async def crash_recovery():
                 )
                 await db.commit()
 
+    return len(stuck_messages)
+
 # =============================================================================
 # HTTP API
 # =============================================================================
@@ -5195,7 +5197,14 @@ async def startup(app):
     _outbox_task = asyncio.create_task(outbox_loop())
 
     # Crash recovery
-    await crash_recovery()
+    stuck = await crash_recovery()
+    try:
+        import workspace_dirty
+        msg = workspace_dirty.describe(workspace_dirty.dirty_files(WORKSPACE_ROOT), bool(stuck))
+        if msg:
+            log.warning(msg)
+    except Exception as e:
+        log.debug(f"dirty-tree check skipped: {e}")
     await hive_startup_sweep()
 
     # Start shard subprocesses, one at a time in plan order.
