@@ -16,7 +16,7 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- `discord.role_id_env` may name an env var that holds several role ids, comma-separated, so one agent can answer to more than one Discord role (for example a shared "all agents" role). A single id and an unset variable behave as before. New `routing.parse_role_ids`.
+- `discord.role_id_env` may name an env var that holds several role ids, comma-separated, so one agent can answer to more than one Discord role. A single id and an unset variable behave as before. A non-numeric part is skipped with a warning. A role id belongs to one agent: if two agents list the same role, the first one loaded keeps it and the relay logs a warning (a message to a shared role is not fanned out to both). New `routing.parse_role_ids`.
 - Agent process health (karakos-128). `/health` and `/agents` report each shard's `pid`, `uptime_seconds` and `last_turn_at`, and `/health` reads `degraded` when a shard's process is dead. The dashboard shows the new fields.
 - Message Content intent check (karakos-130). The relay logs one loud error per process when a message that mentions someone else arrives with empty text, the sign that the Discord Message Content intent is off. `docs/` explains how to tell and how to turn it on.
 - Startup dirty-tree report (karakos-132). When the workspace is a git repo with uncommitted files, the agent server logs a WARNING at startup naming up to 20 of them, and says a crash is likely when `crash_recovery` found stuck messages. Skipped silently without a `.git` directory; never blocks startup. New `lib/workspace_dirty.py`. `crash_recovery()` now returns the stuck-message count.

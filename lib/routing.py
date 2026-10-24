@@ -19,13 +19,17 @@ class Route:
     reason: str  # "mention" | "channel" | "primary_fallback" | "mention_unlisted"
 
 
-def parse_role_ids(raw):
+def parse_role_ids(raw, on_invalid=None):
     """Role ids from an env value: one id, or several separated by commas or
-    spaces. Unset, empty or non-numeric parts are skipped (a bad part never
-    hides the good ones)."""
+    spaces. Empty and non-numeric parts are skipped (a bad part never hides the
+    good ones); each skipped non-numeric part is passed to ``on_invalid``."""
     out = []
     for part in str(raw or "").replace(",", " ").split():
-        if part.isdigit() and int(part) not in out:
+        if not part.isdigit():
+            if on_invalid:
+                on_invalid(part)
+            continue
+        if int(part) not in out:
             out.append(int(part))
     return out
 
