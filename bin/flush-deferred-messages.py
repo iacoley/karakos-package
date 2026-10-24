@@ -27,13 +27,16 @@ stale/ and invalid/ are pruned after FLUSH_RETENTION_DAYS.
 
 import json
 import os
+import sys as _sys
+_sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../lib")))
+from paths import workspace_root  # noqa: E402
 import sys
 import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 
-WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT") or os.environ.get("KARAKOS_HOME") or os.path.abspath(os.path.join(__file__, "..", "..")))
+WORKSPACE_ROOT = Path(workspace_root())
 DEFERRED_DIR = WORKSPACE_ROOT / "data" / "deferred-messages"
 AGENT_SERVER_PORT = os.environ.get("AGENT_SERVER_PORT", "18791")
 AGENT_SERVER_URL = os.environ.get(

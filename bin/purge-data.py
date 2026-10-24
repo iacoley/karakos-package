@@ -13,13 +13,16 @@ Called by scheduler daily at 4:30 AM.
 
 import logging
 import os
+import sys as _sys
+_sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../lib")))
+from paths import workspace_root  # noqa: E402
 import re
 import sqlite3
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-WORKSPACE = Path(os.environ.get("WORKSPACE_ROOT") or os.environ.get("KARAKOS_HOME") or os.path.abspath(os.path.join(__file__, "..", "..")))
+WORKSPACE = Path(workspace_root())
 MESSAGES_DIR = WORKSPACE / "data" / "messages"
 # Must match mcp/tools-server.py:AUDIT_DB_PATH — that server is the only
 # writer, and this purge is the only reader. tests/test_purge.py asserts the

@@ -8,6 +8,9 @@ from __future__ import annotations
 
 import json
 import os
+import sys as _sys
+_sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".")))
+from paths import workspace_root  # noqa: E402
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
@@ -150,4 +153,4 @@ def tick(workspace, now=None, send=None):
 
 
 def run():
-    tick(os.environ.get("WORKSPACE_ROOT") or os.environ.get("KARAKOS_HOME") or os.path.abspath(os.path.join(__file__, "..", "..")))
+    tick(workspace_root())

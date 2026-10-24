@@ -36,7 +36,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKSPACE_ROOT="${WORKSPACE_ROOT:-${KARAKOS_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}}"
+source "$(dirname "${BASH_SOURCE[0]}")/lib/paths.sh"
 
 # Overridable only so the tests can watch the real call happen against a
 # recording stand-in; the command name and arguments stay production ones.

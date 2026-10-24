@@ -10,6 +10,9 @@ import schedule
 import subprocess
 import sys
 import os
+import sys as _sys
+_sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../lib")))
+from paths import workspace_root  # noqa: E402
 import json
 import time
 import logging
@@ -17,7 +20,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 
-WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT") or os.environ.get("KARAKOS_HOME") or os.path.abspath(os.path.join(__file__, "..", "..")))
+WORKSPACE_ROOT = Path(workspace_root())
 HEALTH_FILE = WORKSPACE_ROOT / "data" / "health" / "scheduler.json"
 
 # How often the loop wakes. Agent-scheduled oneshots are polled on every tick,

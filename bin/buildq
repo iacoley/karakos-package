@@ -18,6 +18,9 @@ agents unless --no-agents. Both run while the queue is disabled.
 import argparse
 import json
 import os
+import sys as _sys
+_sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../lib")))
+from paths import workspace_root  # noqa: E402
 import re
 import shutil
 import sqlite3
@@ -254,7 +257,7 @@ def _compose(brief, flags):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="buildq")
-    ap.add_argument("--workspace", default=os.environ.get("WORKSPACE_ROOT", str(PKG)))
+    ap.add_argument("--workspace", default=workspace_root())
     ap.add_argument("--force", action="store_true", help="run even when the queue is disabled")
     ap.add_argument("--json", action="store_true", dest="as_json")
     common = argparse.ArgumentParser(add_help=False)

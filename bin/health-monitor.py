@@ -6,6 +6,9 @@ Health Monitor — Checks component health and alerts on staleness
 import json
 import logging
 import os
+import sys as _sys
+_sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../lib")))
+from paths import workspace_root  # noqa: E402
 import subprocess  # noqa: F401  (tests patch monitor.subprocess)
 import sys
 import time
@@ -13,7 +16,7 @@ from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from logging.handlers import RotatingFileHandler
 
-WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT") or os.environ.get("KARAKOS_HOME") or os.path.abspath(os.path.join(__file__, "..", "..")))
+WORKSPACE_ROOT = Path(workspace_root())
 HEALTH_DIR = WORKSPACE_ROOT / "data" / "health"
 
 # Logging

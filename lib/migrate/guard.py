@@ -5,6 +5,9 @@
 """
 import json
 import os
+import sys as _sys
+_sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")))
+from paths import workspace_root  # noqa: E402
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -88,7 +91,7 @@ def stamp_fresh(data_dir) -> bool:
 
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
-    default = os.path.join(os.environ.get("WORKSPACE_ROOT") or os.environ.get("KARAKOS_HOME") or os.path.abspath(os.path.join(__file__, "..", "..", "..")), "data")
+    default = os.path.join(workspace_root(), "data")
     if argv[:1] == ["check"]:
         require_stamp(argv[1] if len(argv) > 1 else default)
         return 0

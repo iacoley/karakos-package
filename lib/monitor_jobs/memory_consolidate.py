@@ -6,6 +6,9 @@ and on failure so the health monitor can tell a dead job from a failing one.
 """
 import json
 import os
+import sys as _sys
+_sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")))
+from paths import workspace_root  # noqa: E402
 import sys
 import time
 from datetime import datetime, timezone
@@ -22,7 +25,7 @@ HEALTH_FILE = "memory-consolidate.json"
 
 def _workspace(ctx) -> Path:
     ws = ctx.get("workspace") if isinstance(ctx, dict) else getattr(ctx, "workspace", None)
-    return Path(ws or os.environ.get("WORKSPACE_ROOT") or os.environ.get("KARAKOS_HOME") or os.path.abspath(os.path.join(__file__, "..", "..", "..")))
+    return Path(ws or workspace_root())
 
 
 def _write_health(workspace: Path, ok: bool, stats: dict) -> None:
@@ -77,7 +80,7 @@ def run_job(ctx) -> dict:
 
 def run_scheduled() -> None:
     """Scheduler entry point (job_registry run target)."""
-    run_job({"workspace": os.environ.get("WORKSPACE_ROOT") or os.environ.get("KARAKOS_HOME") or os.path.abspath(os.path.join(__file__, "..", "..", ".."))})
+    run_job({"workspace": workspace_root()})
 
 
 JOB = {

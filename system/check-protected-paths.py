@@ -11,12 +11,15 @@ Usage:
 
 import json
 import os
+import sys as _sys
+_sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../lib")))
+from paths import workspace_root  # noqa: E402
 import subprocess
 import sys
 from fnmatch import fnmatch
 from pathlib import Path
 
-WORKSPACE = Path(os.environ.get("WORKSPACE_ROOT") or os.environ.get("KARAKOS_HOME") or os.path.abspath(os.path.join(__file__, "..", "..")))
+WORKSPACE = Path(workspace_root())
 CONFIG_PATH = WORKSPACE / "config" / "protected-paths.json"
 EVENTS_LOG = WORKSPACE / "logs" / "git-events.jsonl"
 

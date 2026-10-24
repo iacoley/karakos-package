@@ -8,6 +8,9 @@ dispatches to skill scripts, maintains audit trail.
 
 import json
 import os
+import sys as _sys
+_sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../lib")))
+from paths import workspace_root  # noqa: E402
 import sqlite3
 import subprocess
 import sys
@@ -22,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # repo root, for lib.graph
 from _handshake import initialize_result  # noqa: E402
 
-WORKSPACE = Path(os.environ.get("WORKSPACE_ROOT") or os.environ.get("KARAKOS_HOME") or os.path.abspath(os.path.join(__file__, "..", "..")))
+WORKSPACE = Path(workspace_root())
 SKILLS_DIR = WORKSPACE / "skills"
 HEALTH_FILE = WORKSPACE / "data" / "health" / "mcp-tools.json"
 HEALTH_INTERVAL_S = 120

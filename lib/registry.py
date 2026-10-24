@@ -18,6 +18,9 @@ never mutates 1.x data.
 
 import json
 import os
+import sys as _sys
+_sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".")))
+from paths import workspace_root  # noqa: E402
 import re
 import sys
 from dataclasses import dataclass, field
@@ -772,7 +775,7 @@ def _init_main(ws, args):
 
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
-    ws = os.environ.get("WORKSPACE_ROOT") or str(Path(__file__).resolve().parent.parent)
+    ws = workspace_root()
     if argv[:1] == ["--workspace"] and len(argv) >= 2:
         ws, argv = argv[1], argv[2:]
     usage = "usage: registry.py [--workspace DIR] ids | field <id> <key> | role <role> | legacy | validate"

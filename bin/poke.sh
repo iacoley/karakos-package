@@ -11,7 +11,7 @@
 
 set -euo pipefail
 
-WORKSPACE_ROOT="${WORKSPACE_ROOT:-${KARAKOS_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}}"
+source "$(dirname "${BASH_SOURCE[0]}")/lib/paths.sh"
 AGENT_SERVER_TOKEN="${AGENT_SERVER_TOKEN:-}"
 AGENT_SERVER_PORT="${AGENT_SERVER_PORT:-18791}"
 CHANNELS_CONFIG="${WORKSPACE_ROOT}/config/channels.json"

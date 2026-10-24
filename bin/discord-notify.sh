@@ -7,7 +7,7 @@
 
 set -euo pipefail
 
-WORKSPACE_ROOT="${WORKSPACE_ROOT:-${KARAKOS_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}}"
+source "$(dirname "${BASH_SOURCE[0]}")/lib/paths.sh"
 
 CHANNEL_NAME="${1:-}"
 MESSAGE="${2:-}"

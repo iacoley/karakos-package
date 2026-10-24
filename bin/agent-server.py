@@ -13,6 +13,9 @@ import errno
 import json
 import logging
 import os
+import sys as _sys
+_sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../lib")))
+from paths import workspace_root  # noqa: E402
 import re
 import signal
 import subprocess
@@ -62,7 +65,7 @@ from lib.migrate.guard import require_stamp  # noqa: E402
 # Configuration
 # =============================================================================
 
-WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT") or os.environ.get("KARAKOS_HOME") or os.path.abspath(os.path.join(__file__, "..", "..")))
+WORKSPACE_ROOT = Path(workspace_root())
 PORT = int(os.environ.get("AGENT_SERVER_PORT", "18791"))
 DB_PATH = WORKSPACE_ROOT / "data" / "memory" / "agent-server.db"
 AGENTS_CONFIG_PATH = WORKSPACE_ROOT / "config" / "agents.yaml"

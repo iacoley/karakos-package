@@ -16,6 +16,9 @@ from __future__ import annotations
 
 import json
 import os
+import sys as _sys
+_sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../lib")))
+from paths import workspace_root  # noqa: E402
 import sys
 from pathlib import Path
 
@@ -108,7 +111,7 @@ def sync(root: Path) -> bool:
 
 def main(argv: list[str]) -> int:
     root = Path(argv[1] if len(argv) > 1 else
-                os.environ.get("WORKSPACE_ROOT") or Path(__file__).resolve().parent.parent)
+                workspace_root())
     changed = sync(root)
     print("hooks-sync: updated" if changed else "hooks-sync: unchanged")
     return 0

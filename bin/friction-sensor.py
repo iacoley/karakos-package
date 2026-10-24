@@ -7,6 +7,9 @@ Appends to data/friction-log.jsonl and refreshes data/friction/weekly.md.
 """
 import argparse
 import os
+import sys as _sys
+_sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../lib")))
+from paths import workspace_root  # noqa: E402
 import sys
 from pathlib import Path
 
@@ -20,7 +23,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--summary", action="store_true")
     ap.add_argument("--days", type=int, default=7)
-    ap.add_argument("--workspace", default=os.environ.get("WORKSPACE_ROOT", str(ROOT)))
+    ap.add_argument("--workspace", default=workspace_root())
     a = ap.parse_args(argv)
     if a.summary:
         print(friction.summary_text(friction.read_log(a.workspace, a.days), a.days), end="")

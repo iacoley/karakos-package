@@ -38,6 +38,9 @@ from __future__ import annotations
 
 import json
 import os
+import sys as _sys
+_sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../lib")))
+from paths import workspace_root  # noqa: E402
 import re
 import subprocess
 import sys
@@ -49,7 +52,7 @@ from _handshake import initialize_result  # noqa: E402
 from urllib import error as urlerror
 from urllib import request as urlrequest
 
-WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT", str(Path(__file__).resolve().parent.parent)))
+WORKSPACE_ROOT = Path(workspace_root())
 SERVER_URL = os.environ.get("AGENT_SERVER_URL", f"http://127.0.0.1:{os.environ.get('AGENT_SERVER_PORT', '18791')}").rstrip("/")
 TOKEN = os.environ.get("AGENT_SERVER_TOKEN", "")
 CREATE_AGENT_SH = WORKSPACE_ROOT / "bin" / "create-agent.sh"
