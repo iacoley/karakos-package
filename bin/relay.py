@@ -649,9 +649,8 @@ def load_config():
                 discord_id_to_agent[int(bot_id)] = agent_name
         role_id_env = config.get("discord_role_id_env")
         if role_id_env:
-            role_id = os.environ.get(role_id_env)
-            if role_id:
-                discord_role_id_to_agent[int(role_id)] = agent_name
+            for role_id in routing.parse_role_ids(os.environ.get(role_id_env)):
+                discord_role_id_to_agent[role_id] = agent_name
 
     for name, cfg in (channels_config.get("channels") or {}).items():
         if isinstance(cfg, dict) and cfg.get("mention_only") is True and cfg.get("reply_gate"):

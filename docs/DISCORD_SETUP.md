@@ -109,7 +109,7 @@ If you want each agent to post under its own identity:
    ```
 5. In `config/agents.yaml`, set each agent's `discord.token_env` and `discord.bot_id_env`
    (and `discord.role_id_env` if you want a Discord role to address the agent; see
-   `mention_only` below)
+   `mention_only` below). The variable it names may hold several role ids separated by commas
 
 Without multi-bot setup, all agents post through the primary bot.
 

@@ -541,6 +541,31 @@ def test_role_id_env_is_read_from_the_registry_into_the_relay_map(relay, monkeyp
     assert relay.discord_role_id_to_agent == {ROLE_ID: "amos"}
 
 
+def test_role_id_env_accepts_several_ids_and_ignores_bad_parts(relay, monkeypatch, tmp_path):
+    import registry
+    monkeypatch.setenv("DISCORD_ROLE_ID_AMOS", f"{ROLE_ID}, {ROLE_ID + 1} nope,{ROLE_ID}")
+    monkeypatch.setattr(relay.agent_registry, "load_registry", lambda ws: registry.parse_registry({
+        "version": 2, "agents": {
+            "amos": {"name": "amos", "role": "primary",
+                     "discord": {"role_id_env": "DISCORD_ROLE_ID_AMOS"},
+                     "shards": [{"id": "amos", "channels": []}]},
+            "kothar": {"name": "kothar", "role": "monitor"}}}))
+    monkeypatch.setattr(relay, "discord_id_to_agent", {})
+    monkeypatch.setattr(relay, "discord_role_id_to_agent", {})
+    monkeypatch.setattr(relay, "CHANNELS_CONFIG_PATH", tmp_path / "channels.json")
+
+    relay.load_config()
+
+    assert relay.discord_role_id_to_agent == {ROLE_ID: "amos", ROLE_ID + 1: "amos"}
+
+
+def test_parse_role_ids():
+    import routing
+    assert routing.parse_role_ids("123") == [123]
+    assert routing.parse_role_ids("1,2 3,,x") == [1, 2, 3]
+    assert routing.parse_role_ids("") == [] and routing.parse_role_ids(None) == []
+
+
 # ---------------------------------------------------------------------------
 # #131 — the gate is on by default for channels with two or more agents
 # ---------------------------------------------------------------------------
