@@ -4,6 +4,9 @@ agent never reads its queue."""
 from __future__ import annotations
 
 import os
+import sys as _sys
+_sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".")))
+from paths import workspace_root  # noqa: E402
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -95,7 +98,7 @@ def _log_failure(workspace, msg: str) -> None:
 
 def send(post, config=None, workspace=None) -> bool:
     """Run bin/discord-notify.sh directly. True only if it actually sent."""
-    ws = Path(workspace or os.environ.get("WORKSPACE_ROOT", "/workspace"))
+    ws = Path(workspace or workspace_root())
     channel = post.get("channel") or ((config or {}).get("alerts", {}).get("channel", "signals"))
     notify = ws / "bin" / "discord-notify.sh"
     if not notify.exists():

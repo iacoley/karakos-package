@@ -38,12 +38,15 @@ Flags:
 import argparse
 import json
 import os
+import sys as _sys
+_sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../lib")))
+from paths import workspace_root  # noqa: E402
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
 
-WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT", "/workspace"))
+WORKSPACE_ROOT = Path(workspace_root())
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "lib"))
 sys.path.insert(1, str(WORKSPACE_ROOT / "lib"))
 import stall  # noqa: E402

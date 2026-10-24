@@ -9,7 +9,7 @@
 # off the same settings file.
 set -euo pipefail
 
-WORKSPACE_ROOT="${WORKSPACE_ROOT:-/workspace}"
+source "$(dirname "${BASH_SOURCE[0]}")/../../bin/lib/paths.sh"
 LOG_DIR="$WORKSPACE_ROOT/logs"
 mkdir -p "$LOG_DIR"
 

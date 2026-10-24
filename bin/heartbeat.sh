@@ -3,7 +3,7 @@
 
 set -euo pipefail
 
-WORKSPACE_ROOT="${WORKSPACE_ROOT:-/workspace}"
+source "$(dirname "${BASH_SOURCE[0]}")/lib/paths.sh"
 AGENT="${1:-}"
 
 if [ -z "$AGENT" ]; then

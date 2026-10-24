@@ -36,6 +36,8 @@ def old_script(name, tmp_path):
     d = tmp_path / "old" / "bin"
     d.mkdir(parents=True, exist_ok=True)
     (d.parent / "lib").symlink_to(ROOT / "lib")
+    if not (d / "lib").exists():
+        (d / "lib").symlink_to(ROOT / "bin" / "lib")
     p = d / name
     p.write_text(text.replace(GUARD, ""))
     p.chmod(0o755)

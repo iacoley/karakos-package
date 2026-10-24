@@ -9,6 +9,9 @@ Needs entity embeddings (the nightly memory-consolidate job backfills them).
 import argparse
 import json
 import os
+import sys as _sys
+_sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../lib")))
+from paths import workspace_root  # noqa: E402
 import sys
 from pathlib import Path
 
@@ -25,7 +28,7 @@ def main(argv=None):
     ap.add_argument("--threshold", type=float, default=entity_dedup.THRESHOLD)
     ap.add_argument("--max", type=int, default=entity_dedup.MAX_MERGES, dest="cap")
     ap.add_argument("--json", action="store_true")
-    ap.add_argument("--workspace", default=os.environ.get("WORKSPACE_ROOT", str(ROOT)))
+    ap.add_argument("--workspace", default=workspace_root(ROOT))
     a = ap.parse_args(argv)
     if not 0.5 <= a.threshold <= 1.0:
         ap.error("--threshold must be between 0.5 and 1.0")

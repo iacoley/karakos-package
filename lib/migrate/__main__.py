@@ -1,6 +1,9 @@
 """python3 -m lib.migrate [--dry-run|--auto|--force|--to-backup DIR|--backup-to DIR]"""
 import argparse
 import os
+import sys as _sys
+_sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")))
+from paths import workspace_root  # noqa: E402
 import sys
 from pathlib import Path
 
@@ -30,7 +33,7 @@ def main(argv=None) -> int:
     p.add_argument("--report-to", metavar="FILE",
                    help="with --dry-run: write the report here (outside the install)")
     p.add_argument("--to-backup", metavar="DIR", help="restore a backup directory")
-    p.add_argument("--root", default=os.environ.get("WORKSPACE_ROOT", "/workspace"),
+    p.add_argument("--root", default=workspace_root(),
                    help=argparse.SUPPRESS)
     a = p.parse_args(argv)
     root = Path(a.root)

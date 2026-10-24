@@ -14,13 +14,16 @@ manual tool and will be removed after that.
 import argparse
 import json
 import os
+import sys as _sys
+_sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../lib")))
+from paths import workspace_root  # noqa: E402
 import sys
 import subprocess
 import time
 from pathlib import Path
 from datetime import datetime
 
-WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT", "/workspace"))
+WORKSPACE_ROOT = Path(workspace_root())
 STREAM_LOG_DIR = WORKSPACE_ROOT / "logs" / "agent-streams"
 SUMMARY_DIR = WORKSPACE_ROOT / "logs" / "session-summaries"
 SUMMARY_FILE_TEMPLATE = WORKSPACE_ROOT / "data" / "last-session-summary-{agent}.md"

@@ -61,12 +61,15 @@ from __future__ import annotations
 import json
 import math
 import os
+import sys as _sys
+_sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../lib")))
+from paths import workspace_root  # noqa: E402
 import signal
 import subprocess
 import sys
 from pathlib import Path
 
-WORKSPACE_ROOT = Path(os.environ.get("WORKSPACE_ROOT", "/workspace"))
+WORKSPACE_ROOT = Path(workspace_root())
 
 # Must match AUTOMATED_TRAFFIC_SENTINEL in bin/agent-server.py exactly.
 AUTOMATED_TRAFFIC_SENTINEL = "[KARAKOS_AUTOMATED]"

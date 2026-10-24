@@ -9,6 +9,9 @@ Writes data/friction/YYYY-MM-DD.md. Filing upstream only happens with
 import argparse
 import json
 import os
+import sys as _sys
+_sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../lib")))
+from paths import workspace_root  # noqa: E402
 import sys
 from pathlib import Path
 
@@ -26,7 +29,7 @@ def main(argv=None):
     ap.add_argument("--file", action="store_true", help="file the drafts as issues")
     ap.add_argument("--repo", default="")
     ap.add_argument("--yes", action="store_true", help="the drafts were approved by a person")
-    ap.add_argument("--workspace", default=os.environ.get("WORKSPACE_ROOT", str(ROOT)))
+    ap.add_argument("--workspace", default=workspace_root(ROOT))
     a = ap.parse_args(argv)
     r = fr.review(a.workspace, a.days, a.min_count)
     out = {"report": r["report"], "events": r["events"], "causes": len(r["causes"])}

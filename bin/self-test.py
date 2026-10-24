@@ -12,6 +12,9 @@ import argparse
 import importlib.util
 import json
 import os
+import sys as _sys
+_sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../lib")))
+from paths import workspace_root  # noqa: E402
 import subprocess
 import sys
 import threading
@@ -123,7 +126,7 @@ def run(workspace):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--json", action="store_true")
-    ap.add_argument("--workspace", default=os.environ.get("WORKSPACE_ROOT", str(ROOT)))
+    ap.add_argument("--workspace", default=workspace_root(ROOT))
     a = ap.parse_args(argv)
     results = run(Path(a.workspace))
     ok = all(r["ok"] for r in results)

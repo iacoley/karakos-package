@@ -391,11 +391,20 @@ def _tools_server(tmp_workspace, tool, args):
     return json.loads(result.stdout)
 
 
+def _with_resolver(ws):
+    """Scripts copied into a fake workspace need the root resolver beside them."""
+    (ws / "lib").mkdir(exist_ok=True)
+    (ws / "bin" / "lib").mkdir(exist_ok=True)
+    (ws / "lib" / "paths.py").write_bytes((PACKAGE_ROOT / "lib" / "paths.py").read_bytes())
+    (ws / "bin" / "lib" / "paths.sh").write_bytes((PACKAGE_ROOT / "bin" / "lib" / "paths.sh").read_bytes())
+
+
 def test_agent_can_create_list_and_cancel_through_the_mcp_tool(tmp_workspace):
     """Drives mcp/tools-server.py's real dispatch entry point, not the helper."""
     (tmp_workspace / "bin").mkdir(exist_ok=True)
     for name in ("oneshot.py", "poke.sh"):
         (tmp_workspace / "bin" / name).write_bytes((PACKAGE_ROOT / "bin" / name).read_bytes())
+    _with_resolver(tmp_workspace)
 
     created = _tools_server(tmp_workspace, "schedule", {
         "action": "create", "label": "check-logs", "when": "10m",
@@ -416,6 +425,7 @@ def test_agent_can_create_list_and_cancel_through_the_mcp_tool(tmp_workspace):
 def test_mcp_tool_rejects_a_create_with_no_when(tmp_workspace):
     (tmp_workspace / "bin").mkdir(exist_ok=True)
     (tmp_workspace / "bin" / "oneshot.py").write_bytes(ONESHOT_BIN.read_bytes())
+    _with_resolver(tmp_workspace)
     result = _tools_server(tmp_workspace, "schedule",
                            {"action": "create", "label": "x", "message": "hi"})
     assert "error" in result

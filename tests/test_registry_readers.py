@@ -165,6 +165,8 @@ def _boot(ws):
     for n in ("data", "logs", "inbox", "bin"):
         (ws / n).mkdir(exist_ok=True)
     shutil.copy(ROOT / "bin" / "hooks-sync.py", ws / "bin" / "hooks-sync.py")
+    (ws / "lib").mkdir(exist_ok=True)
+    shutil.copy(ROOT / "lib" / "paths.py", ws / "lib" / "paths.py")
     env = {**os.environ, "WORKSPACE_ROOT": str(ws), "DASHBOARD_PORT": "3000",
            "AGENT_SERVER_TOKEN": "t", "PATH": f"{_fake_supervisord(ws)}:{os.environ['PATH']}"}
     env.pop("KARAKOS_SKIP_STAMP_CHECK", None)

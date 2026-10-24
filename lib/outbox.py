@@ -18,6 +18,9 @@ import argparse
 import hashlib
 import json
 import os
+import sys as _sys
+_sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".")))
+from paths import workspace_root  # noqa: E402
 import random
 import re
 import sqlite3
@@ -486,7 +489,7 @@ def show(conn, rid, include_content=False):
 # --- CLI ------------------------------------------------------------------------
 
 def main(argv=None) -> int:
-    default = Path(os.environ.get("WORKSPACE_ROOT", "/workspace")) / "data" / "outbox" / "outbox.db"
+    default = Path(workspace_root()) / "data" / "outbox" / "outbox.db"
     p = argparse.ArgumentParser(prog="outbox")
     p.add_argument("--db", default=str(default))
     sub = p.add_subparsers(dest="cmd", required=True)

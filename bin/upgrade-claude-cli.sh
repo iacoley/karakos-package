@@ -45,7 +45,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WORKSPACE_ROOT="${WORKSPACE_ROOT:-/workspace}"
+source "$(dirname "${BASH_SOURCE[0]}")/lib/paths.sh"
 
 # Which directory discord-notify.sh is read from. Overridable so the tests can
 # watch the real call happen against a recording stand-in; the command name and

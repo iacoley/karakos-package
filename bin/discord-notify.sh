@@ -7,7 +7,7 @@
 
 set -euo pipefail
 
-WORKSPACE_ROOT="${WORKSPACE_ROOT:-/workspace}"
+source "$(dirname "${BASH_SOURCE[0]}")/lib/paths.sh"
 
 CHANNEL_NAME="${1:-}"
 MESSAGE="${2:-}"

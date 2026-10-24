@@ -9,6 +9,9 @@ $WORKSPACE_ROOT, else this checkout. Exit 3 when there is no overlay.
 """
 import argparse
 import os
+import sys as _sys
+_sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../lib")))
+from paths import workspace_root  # noqa: E402
 import subprocess
 import sys
 from pathlib import Path
@@ -22,7 +25,7 @@ NO_OVERLAY = "no overlay; run: python3 bin/overlay.py init"
 
 
 def workspace_of(args) -> Path:
-    return Path(args.workspace or os.environ.get("WORKSPACE_ROOT") or PKG).resolve()
+    return Path(args.workspace or workspace_root(PKG)).resolve()
 
 
 def _git(repo, *args, capture=True) -> subprocess.CompletedProcess:
