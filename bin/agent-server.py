@@ -210,6 +210,10 @@ agent_states: Dict[str, str] = {}
 response_buffers: Dict[str, str] = {}
 agent_last_cost: Dict[str, float] = {}
 agent_sessions: Dict[str, str] = {}
+# Wall-clock spawn time of each shard's current subprocess, and the last turn
+# that ended without is_error. In memory only; read by /health and /agents.
+agent_spawn_ts: Dict[str, float] = {}
+agent_last_turn_ts: Dict[str, float] = {}
 stderr_reader_tasks: Dict[str, asyncio.Task] = {}
 # One task per agent awaiting its subprocess's exit (#90). Fires a respawn and
 # a channel notice when the process dies on its own.
@@ -956,6 +960,7 @@ async def start_agent_subprocess(shard: str):
         agent_processes[shard] = proc
         agent_states[shard] = "IDLE"
         agent_sessions[shard] = session_id
+        agent_spawn_ts[shard] = time.time()
         # A live process is by definition no longer deliberately dead. Clearing
         # here rather than in the kill paths keeps the flag correct for the one
         # kill that is *not* followed by a spawn — POST /kill, which is meant
@@ -1253,6 +1258,8 @@ async def flush_agent_queue(shard: str) -> int:
 
 async def post_cost_update(agent: str, metadata: Dict):
     """Post cost update to Discord and database"""
+    if not metadata.get("is_error"):
+        agent_last_turn_ts[agent] = time.time()
     session_total = metadata.get("total_cost_usd", 0.0)
     input_tokens = metadata.get("input_tokens", 0)
     output_tokens = metadata.get("output_tokens", 0)
@@ -3168,6 +3175,19 @@ async def handle_outbox_discard(request):
     return await _outbox_verb(request, outbox_lib.discard)
 
 
+def _process_view(shard):
+    """pid, uptime and last good turn for a shard's subprocess. pid and uptime
+    are null when the shard has no live process."""
+    proc = agent_processes.get(shard)
+    alive = proc is not None and proc.returncode is None
+    started = agent_spawn_ts.get(shard)
+    return {
+        "pid": proc.pid if alive else None,
+        "uptime_seconds": int(time.time() - started) if alive and started else None,
+        "last_turn_at": agent_last_turn_ts.get(shard),
+    }
+
+
 async def handle_health(request):
     """GET /health - Health check.
 
@@ -3199,6 +3219,7 @@ async def handle_health(request):
             # 0 = unknown.
             "context_tokens": ctx_by_shard.get(sp.id, 0),
             "stolen_total": STATE.stolen_total.get(sp.id, 0),
+            **_process_view(sp.id),
         }
 
     for agent in dict.fromkeys(sp.agent for sp in specs):
@@ -3219,7 +3240,11 @@ async def handle_health(request):
     undelivered = dead_letter_count()
 
     return web.json_response({
-        "status": "healthy",
+        # degraded: a shard's process is dead and no operator pause or usage
+        # gate explains it.
+        "status": ("degraded" if any(not shard_status[sp.id]["alive"]
+                                     and not _paused_entry(sp.id) for sp in specs)
+                   else "healthy"),
         # Both of these are read by the dashboard home page's summary cards,
         # which showed a hardcoded 0 for as long as nothing served them.
         # queue_depth is the sum of what the loop above already counted.
@@ -3275,7 +3300,7 @@ async def handle_agents(request):
                 "is_default": sp.is_default,
                 "state": agent_states.get(sp.id, "UNKNOWN"),
                 "alive": proc is not None and proc.returncode is None,
-                "pid": proc.pid if proc is not None else None,
+                **_process_view(sp.id),
                 "session_id": agent_sessions.get(sp.id, "")[:8],
                 "queue_depth": depth_by_shard.get(sp.id, 0),
                 "context_tokens": ctx_by_shard.get(sp.id, 0),

@@ -65,7 +65,8 @@ def test_agents_and_health_shapes(harness):
     assert a["state"] == "PROCESSING"
     assert [s["id"] for s in a["shards"]] == ["a", "a-2"]
     assert a["shards"][0]["is_default"] is True and a["shards"][1]["is_default"] is False
-    assert set(a["shards"][1]) == {"id", "is_default", "state", "alive", "pid", "session_id",
+    assert set(a["shards"][1]) == {"id", "is_default", "state", "alive", "pid", "uptime_seconds",
+                                   "last_turn_at", "session_id",
                                    "queue_depth", "context_tokens", "channels", "last_channel", "paused",
                                        "stolen_total", "steer_pending", "steered_total",
                                       "effort", "effort_source"}
@@ -84,7 +85,8 @@ def test_agents_and_health_shapes(harness):
     assert ha["a"]["state"] == "PROCESSING" and ha["a"]["alive"] is True
     assert set(hl["shards"]) == {"a", "a-2", "b", "monitor"}
     for sid in hl["shards"]:
-        assert {"state", "alive", "queue_depth", "session_id"} <= set(hl["shards"][sid])
+        assert {"state", "alive", "queue_depth", "session_id", "pid", "uptime_seconds",
+                "last_turn_at"} <= set(hl["shards"][sid])
     assert ha["a"]["queue_depth"] == hl["shards"]["a"]["queue_depth"] + hl["shards"]["a-2"]["queue_depth"]
     assert hl["queue_depth"] == sum(v["queue_depth"] for v in hl["shards"].values())
 

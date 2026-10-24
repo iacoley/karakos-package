@@ -67,7 +67,9 @@ curl -fsS -o /dev/null -w '%{http_code}\n' "http://localhost:$DASHBOARD_PORT/log
 docker compose -f config/docker-compose.yml --env-file config/.env exec karakos cat data/.schema-version
 ```
 
-Healthy means: `/health` reports `"status": "healthy"` with `outbox.pending` 0;
+Healthy means: `/health` reports `"status": "healthy"` with `outbox.pending` 0
+(`"degraded"` means a shard's process is dead and no pause explains it; each shard
+row has `pid`, `uptime_seconds` and `last_turn_at`);
 `/agents` lists the primary and monitor agents with `alive: true`; the login page
 answers `200`; the stamp names schema 2. Then say hello in the general channel (the
 primary should answer within a minute) or use the dashboard's `/chat`. The same

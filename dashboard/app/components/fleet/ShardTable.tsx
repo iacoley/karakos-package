@@ -34,7 +34,20 @@ export function ShardRows({ shards, now }: { shards: AgentShardRow[]; now: numbe
                 {s.state}
               </span>
             </td>
-            <td data-label="Alive" className={TD} style={{ color: "var(--text-secondary)" }}>{s.alive ? "yes" : "no"}</td>
+            <td
+              data-label="Alive"
+              className={TD}
+              style={s.alive ? { color: "var(--text-secondary)" } : { color: "var(--danger, #c0392b)", fontWeight: 700 }}
+            >
+              {s.alive ? "yes" : "no"}
+            </td>
+            <td data-label="PID" className={TD} style={{ color: "var(--text-secondary)" }}>{s.pid ?? "-"}</td>
+            <td data-label="Up" className={TD} style={{ color: "var(--text-secondary)" }}>
+              {s.uptime_seconds == null ? "-" : `${Math.floor(s.uptime_seconds / 60)}m`}
+            </td>
+            <td data-label="Last turn" className={TD} style={{ color: "var(--text-secondary)" }}>
+              {s.last_turn_at == null ? "never" : new Date(s.last_turn_at * 1000).toISOString().slice(0, 19) + "Z"}
+            </td>
             <td data-label="Paused" className={TD} style={{ color: paused ? WARN : "var(--text-muted)" }}>
               {paused}
             </td>
@@ -58,6 +71,9 @@ export function ShardHead() {
         <th className={TH}>Shard</th>
         <th className={TH}>State</th>
         <th className={TH}>Alive</th>
+        <th className={TH}>PID</th>
+        <th className={TH}>Up</th>
+        <th className={TH}>Last turn</th>
         <th className={TH}>Paused</th>
         <th className={TH}>Context</th>
         <th className={TH}>Queue</th>

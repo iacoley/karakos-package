@@ -28,6 +28,20 @@ describe("ShardTable", () => {
     expect(html.indexOf("alpha-2")).toBeLessThan(html.indexOf("alpha<span"));
     expect(html).toContain("default");
   });
+  it("shows PID, uptime and last turn, and 'never' for a shard with no turn yet", () => {
+    const html = renderToStaticMarkup(
+      <ShardTable
+        now={NOW}
+        agents={[{ name: "a", shards: [
+          shard({ id: "a", alive: false, pid: null }),
+          shard({ id: "a-2", is_default: false, alive: true, pid: 4242, uptime_seconds: 125, last_turn_at: NOW }),
+        ] }]}
+      />
+    );
+    expect(html).toContain("4242");
+    expect(html).toContain("2m");
+    expect(html).toContain("never");
+  });
   it("says 'until usage drops' for an open-ended pause", () => {
     const html = renderToStaticMarkup(
       <ShardTable now={NOW} agents={[{ name: "a", shards: [shard({ paused: { reason: "governor", until: null } })] }]} />

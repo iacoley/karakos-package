@@ -24,6 +24,10 @@ export interface AgentShardRow {
   channels: string[];
   last_channel: string | null;
   paused: PausedInfo | null;
+  /** Whole seconds since the current subprocess spawned; null when no live process. */
+  uptime_seconds?: number | null;
+  /** Epoch seconds of the last turn that ended without is_error; null until one does. */
+  last_turn_at?: number | null;
   [key: string]: unknown;
 }
 
