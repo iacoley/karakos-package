@@ -42,6 +42,7 @@ import discord_ux  # noqa: E402
 import registry as agent_registry  # noqa: E402
 import reply_classifier  # noqa: E402
 import reply_gate_config  # noqa: E402
+import identity  # noqa: E402
 import routing  # noqa: E402
 import tengwar  # noqa: E402
 
@@ -211,7 +212,7 @@ def format_reply_context(target, max_chars: int = REPLY_CONTEXT_MAX_CHARS) -> st
         text = ("[attachments: " + ", ".join(a.filename for a in atts) + "]") if atts else "[no text content]"
     if len(text) > max_chars:
         text = text[:max_chars].rstrip() + "… [truncated]"
-    return f"[In reply to {name}:\n{text}\n]"
+    return f"[In reply to {identity.label(name, getattr(author, 'id', None))}:\n{text}\n]"
 
 
 def parse_sys_command(content: str):

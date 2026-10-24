@@ -21,6 +21,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import discord_ux
 import hive
+import identity
 import msgqueue
 import post_guard
 import stealing
@@ -239,7 +240,8 @@ def format_batch(rows, format_attachments, sentinel: str = AUTOMATED_SENTINEL) -
         # The location is printed only where it changes, to keep batches short.
         where = f"[{tag}] " if tag != prev_tag else ""
         prev_tag = tag
-        part = f"[{msg['created_at']}] {where}{msg['author']}: {msg['content']}"
+        part = (f"[{msg['created_at']}] {where}"
+                f"{identity.row_label(msg)}: {msg['content']}")
         attachment_lines = format_attachments(msg["attachments"])
         if attachment_lines:
             part = f"{part}\n{attachment_lines}"

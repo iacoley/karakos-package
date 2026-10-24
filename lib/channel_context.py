@@ -17,6 +17,11 @@ import time
 from collections import deque
 from datetime import datetime, timezone
 
+try:
+    import identity
+except ImportError:  # imported as `lib.channel_context`
+    from lib import identity
+
 RING = 20
 TEXT_CAP = 300
 DEFAULT_LIMIT = 8
@@ -63,7 +68,7 @@ class ChannelContext:
         if limit <= 0:
             return ""
         own_ids = {str(i) for i in own_ids}
-        entries = [(m, a, t, o or (aid in own_ids), ts, vis)
+        entries = [(m, a, t, o or (aid in own_ids), ts, vis, aid)
                    for m, a, t, o, ts, aid, vis in self._ring.get(int(channel_id), ())]
         ids = [e[0] for e in entries]
         if str(trigger_id) in ids:
@@ -82,7 +87,7 @@ class ChannelContext:
         if not window:
             return ""
         lines = [MORE] if cut else []
-        for _mid, author, text, _own, ts, _vis in window:
+        for _mid, author, text, _own, ts, _vis, aid in window:
             hhmm = datetime.fromtimestamp(ts, timezone.utc).strftime("%H:%M")
-            lines.append(f"[context] {author} ({hhmm}): {text}")
+            lines.append(f"[context] {identity.label(author, aid)} ({hhmm}): {text}")
         return "\n".join(lines)

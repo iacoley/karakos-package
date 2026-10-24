@@ -609,6 +609,14 @@ def test_parse_role_ids():
     assert routing.parse_role_ids("") == [] and routing.parse_role_ids(None) == []
 
 
+def test_reply_context_names_the_replied_to_author_by_id(relay):
+    import types
+    author = types.SimpleNamespace(id=800000000000000001, display_name="Alice B", name="x")
+    target = types.SimpleNamespace(author=author, content="hello", attachments=[])
+    assert relay.format_reply_context(target).startswith(
+        "[In reply to Alice B (id 800000000000000001):")
+
+
 # ---------------------------------------------------------------------------
 # #131 — the gate is on by default for channels with two or more agents
 # ---------------------------------------------------------------------------
