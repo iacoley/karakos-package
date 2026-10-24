@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-SCRIPTS = ["bin/native-install.sh", "bin/native-bootstrap.sh", "bin/native-upgrade.sh",
+SCRIPTS = ["bin/native-migrate.sh", "bin/native-install.sh", "bin/native-bootstrap.sh", "bin/native-upgrade.sh",
            "install.sh", "setup.sh"]
 
 
@@ -87,3 +87,63 @@ def test_bootstrap_ignores_workspace_root_in_env_file(tmp_path):
 def test_setup_native_does_not_write_workspace_root():
     text = (ROOT / "setup.sh").read_text()
     assert "sed -i '/^WORKSPACE_ROOT=/d'" in text
+
+
+def _migrate_ws(tmp_path, running=False):
+    ws = tmp_path / "ws"
+    (ws / "bin" / "lib").mkdir(parents=True)
+    (ws / "config").mkdir()
+    shutil.copy(ROOT / "bin" / "native-migrate.sh", ws / "bin" / "native-migrate.sh")
+    shutil.copy(ROOT / "bin" / "lib" / "paths.sh", ws / "bin" / "lib" / "paths.sh")
+    (ws / "config" / ".env").write_text("WORKSPACE_ROOT=/workspace\nFOO=1\n")
+    stub = tmp_path / "stub"
+    stub.mkdir()
+    log = tmp_path / "docker.log"
+    (stub / "docker").write_text(
+        '#!/bin/bash\necho "$@" >> %s\n'
+        'if [ "$1" = ps ] && [ "$2" = -q ]; then %s; exit 0; fi\n'
+        'if [ "$1" = ps ]; then echo karakos:test; fi\n' % (log, "echo abc123" if running else ":"))
+    (stub / "docker").chmod(0o755)
+    env = {"PATH": f"{stub}:/usr/bin:/bin", "KARAKOS_HOME": str(ws)}
+    return ws, env, log
+
+
+def _run_migrate(ws, env, *args):
+    return subprocess.run(["bash", str(ws / "bin" / "native-migrate.sh"), *args],
+                          capture_output=True, text=True, env=env)
+
+
+def test_migrate_refuses_while_container_runs(tmp_path):
+    ws, env, log = _migrate_ws(tmp_path, running=True)
+    r = _run_migrate(ws, env)
+    assert r.returncode == 1 and "still running" in r.stderr
+    assert "run" not in [l.split()[0] for l in log.read_text().splitlines()]
+
+
+def test_migrate_refuses_nonempty_destination(tmp_path):
+    ws, env, _ = _migrate_ws(tmp_path)
+    (ws / "data").mkdir()
+    (ws / "data" / "x").write_text("1")
+    r = _run_migrate(ws, env)
+    assert r.returncode == 1 and "not empty" in r.stderr
+
+
+def test_migrate_dry_run_changes_nothing(tmp_path):
+    ws, env, log = _migrate_ws(tmp_path)
+    r = _run_migrate(ws, env, "--dry-run")
+    assert r.returncode == 0, r.stderr
+    assert "WORKSPACE_ROOT=/workspace" in (ws / "config" / ".env").read_text()
+    assert not (ws / "data").exists()
+    assert "run" not in [l.split()[0] for l in log.read_text().splitlines()]
+
+
+def test_migrate_copies_three_volumes_and_fixes_env(tmp_path):
+    ws, env, log = _migrate_ws(tmp_path)
+    r = _run_migrate(ws, env)
+    assert r.returncode == 0, r.stderr
+    runs = [l for l in log.read_text().splitlines() if l.startswith("run ")]
+    assert len(runs) == 3 and all("karakos:test" in l and "--entrypoint cp" in l and "-a /from/." in l for l in runs)
+    for kind in ("data", "logs", "inbox"):
+        assert any(f"config_karakos-{kind}:/from:ro" in l for l in runs)
+    assert (ws / "config" / ".env").read_text() == "FOO=1\n"
+    assert not any(l.startswith(("volume rm", "rm ")) for l in log.read_text().splitlines())
