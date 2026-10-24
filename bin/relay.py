@@ -485,6 +485,11 @@ class ReplyGate:
 # human speaks in the channel again.
 GUEST_TURN_LIMIT = int(os.environ.get("GUEST_TURN_LIMIT", "12"))
 
+INTENT_ERROR = (
+    "Discord Message Content intent is OFF for this bot: messages arrive with empty text. "
+    "Enable it in the Discord Developer Portal: Bot -> Privileged Gateway Intents -> "
+    "Message Content Intent, save, then run 'make down && make up'.")
+
 
 class GuestBudget:
     """Bot-to-bot turns per channel since the last human message."""
@@ -885,6 +890,8 @@ def _own_bot_ids(agent, user=None) -> set:
 class DiscordAdapter(discord.Client):
     """Discord message routing to agent server"""
 
+    _intent_warned = False  # class level: adapters built without __init__ still work
+
     def __init__(self, *args, **kwargs):
         intents = discord.Intents.default()
         intents.message_content = True
@@ -987,6 +994,11 @@ class DiscordAdapter(discord.Client):
                     message.channel.id, message.author.display_name,
                     message.content, is_agent=True)
             return
+
+        if (not self._intent_warned and not message.content and message.mentions
+                and not getattr(message, "attachments", None) and not getattr(message, "embeds", None)):
+            self._intent_warned = True
+            log.error(INTENT_ERROR)
 
         # Ignore messages from servers we aren't configured for
         if message.guild and str(message.guild.id) not in self.server_ids:
@@ -2383,6 +2395,9 @@ async def main():
     try:
         # Run Discord bot (blocks until closed)
         await discord_client.start(token)
+    except discord.PrivilegedIntentsRequired:
+        log.error(INTENT_ERROR)
+        raise
     except KeyboardInterrupt:
         log.info("Shutdown signal received")
     finally:

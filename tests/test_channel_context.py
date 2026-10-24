@@ -185,6 +185,7 @@ def test_relay_shows_untagged_sibling_posts_but_not_strangers(relay):
 
     me = SimpleNamespace(
         user=SimpleNamespace(id=99), server_ids=set(), channel_context=cc.ChannelContext(),
+        _intent_warned=False,
         reply_gate=SimpleNamespace(note_agent_post=lambda *a: None, note_message=lambda *a, **k: None),
         capture_message=noop, get_channel_name=lambda c: None,
         resolve_channel=lambda ch: (None, None), allow_bot_message=refuse,

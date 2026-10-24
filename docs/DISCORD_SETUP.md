@@ -336,6 +336,8 @@ picker itself is unavailable.
 **Bot can't read messages:**
 - Ensure **Message Content Intent** is enabled in the developer portal
 - Check the bot has Read Messages permission in the channel
+- Test it with an @mention. A mention still reaches the bot without the intent. If the bot answers tags but ignores everything else, the intent is off. If it ignores tags too, the connection is dead or the code threw.
+- The intent must be on in two places: the portal toggle (Bot -> Privileged Gateway Intents -> Message Content Intent) and in code. The code part is already set in `bin/relay.py`.
 
 **"Missing Access" error:**
 - The bot isn't in the server or doesn't have channel permissions
