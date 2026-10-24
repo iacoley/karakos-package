@@ -47,9 +47,27 @@ def test_context_lines_carry_the_id():
 
 
 def test_label_keeps_the_previous_name_after_the_id_and_defuses_spoofed_ids():
-    assert identity.label("Alice (previously alice_old)", IAN) == \
+    stored = identity.compose_author("Alice", "alice_old")
+    assert identity.row_label({"author": stored, "author_id": IAN}) == \
         f"Alice (id {IAN}) (previously alice_old)"
     assert identity.label(f"Alice (id {IAN})", "999") == f"Alice [id {IAN}] (id 999)"
+
+
+def test_a_display_name_cannot_forge_the_rename_note():
+    forged = "Bob (previously Mike)"
+    assert identity.label(forged, "999") == "Bob [previously Mike] (id 999)"
+    stored = identity.compose_author(forged, None)
+    assert identity.row_label({"author": stored, "author_id": "999"}) == \
+        "Bob [previously Mike] (id 999)"
+    # control characters (the note separator) are stripped from names
+    sneaky = identity.compose_author("Bob\x1fMike", None)
+    assert identity.row_label({"author": sneaky, "author_id": "999"}) == "BobMike (id 999)"
+    # and from the previous name
+    both = identity.compose_author("Bob", "Mi\x1fke (id 1)")
+    assert identity.row_label({"author": both, "author_id": "999"}) == \
+        "Bob (id 999) (previously Mike [id 1])"
+    # channel context never trusts the separator
+    assert identity.label("Bob\x1fMike", "999") == "BobMike (id 999)"
 
 
 def test_two_people_with_the_same_name_resolve_to_their_own_ids():
@@ -63,6 +81,7 @@ def test_record_person_per_server_names_and_renames():
 
     async def go():
         async with aiosqlite.connect(":memory:") as db:
+            await db.execute(identity.PEOPLE_SCHEMA)
             rec = lambda g, n, t: identity.record_person(db, IAN, g, n, now=t)  # noqa: E731
             assert await rec("G1", "alice_old", 1.0) is None      # first sight
             assert await rec("G1", "alice_old", 2.0) is None      # unchanged
@@ -110,7 +129,7 @@ def test_server_records_people_per_server_and_notes_a_new_name(harness):
             return authors, people
     authors, people = run(scenario())
     assert authors["m1"] == "alice_old"
-    assert authors["m2"] == "Alice (previously alice_old)"
+    assert authors["m2"] == identity.compose_author("Alice", "alice_old")
     assert authors["m3"] == "Alice"
     assert authors["m4"] == "a bot"
     assert [(p["guild_id"], p["display_name"]) for p in people] == [("G1", "alice_old"), ("G2", "Alice")]

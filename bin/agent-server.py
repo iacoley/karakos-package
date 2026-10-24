@@ -303,6 +303,8 @@ async def init_db():
     db = await aiosqlite.connect(str(DB_PATH))
     db.row_factory = aiosqlite.Row
 
+    await db.execute(identity.PEOPLE_SCHEMA)  # who an id goes by (lib/identity.py)
+
     # Message queue table
     await db.execute("""
         CREATE TABLE IF NOT EXISTS message_queue (
@@ -3014,7 +3016,7 @@ async def handle_message(request):
     if not is_bot:
         _old_name = await identity.record_person(db, author_id, data.get("guild_id"), author)
         if _old_name:
-            author = f"{author} (previously {_old_name})"
+            author = identity.compose_author(author, _old_name)
 
     # Insert message
     try:

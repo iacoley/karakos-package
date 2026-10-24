@@ -24,7 +24,8 @@ PEOPLE_SCHEMA = """
 """
 
 _NO_ID = ("", "0", "None")
-_PREV_RE = re.compile(r"\A(.*?)( \(previously [^()]*\))?\Z", re.S)
+_SEP = "\x1f"   # unit separator: splits a stored author into name and previous name
+_CTRL = re.compile(r"[\x00-\x1f\x7f]")
 
 
 def has_id(author_id) -> bool:
@@ -32,19 +33,30 @@ def has_id(author_id) -> bool:
 
 
 def _plain(name: str) -> str:
-    """A display name cannot carry its own `(id …)`: parentheses become brackets."""
-    return str(name).replace("(", "[").replace(")", "]")
+    """A display name cannot carry its own `(id …)` or note: control characters
+    are dropped and parentheses become brackets."""
+    return _CTRL.sub("", str(name)).replace("(", "[").replace(")", "]")
 
 
-def label(name, author_id) -> str:
-    """`Name (id 123…)`, with a trailing ` (previously Old)` note kept after the
-    id. Just the name when there is no real id (local and hive callers use 0)."""
-    name = str(name or "unknown")
+def compose_author(name, previous=None) -> str:
+    """The author string stored in the queue. The rename note travels after a
+    separator that `_CTRL` strips from every display name, so a name can never
+    fake one."""
+    name = _CTRL.sub("", str(name or "unknown"))
+    previous = _CTRL.sub("", str(previous or ""))
+    return f"{name}{_SEP}{previous}" if previous else name
+
+
+def label(name, author_id, trusted=False) -> str:
+    """`Name (id 123…)`, with ` (previously Old)` after it when `name` came
+    from `compose_author` (`trusted=True`, queue rows only). Just the name when
+    there is no real id (local and hive callers use 0)."""
+    base, _, prev = str(name or "unknown").partition(_SEP) if trusted else (str(name or "unknown"), "", "")
+    base = _plain(base)
+    note = f" (previously {_plain(prev)})" if prev else ""
     if not has_id(author_id):
-        return name
-    m = _PREV_RE.match(name)
-    base, prev = m.group(1), m.group(2) or ""
-    return f"{_plain(base)} (id {author_id}){prev}"
+        return base + note
+    return f"{base} (id {author_id}){note}"
 
 
 def row_label(msg) -> str:
@@ -54,7 +66,7 @@ def row_label(msg) -> str:
         aid = msg["author_id"]
     except (KeyError, IndexError):
         aid = None
-    return label(msg["author"], aid)
+    return label(msg["author"], aid, trusted=True)
 
 
 async def record_person(db, author_id, guild_id, name, now: Optional[float] = None) -> Optional[str]:
@@ -67,7 +79,6 @@ async def record_person(db, author_id, guild_id, name, now: Optional[float] = No
     author_id, name = str(author_id), str(name)
     guild_id = str(guild_id) if guild_id not in (None, "") else "dm"
     try:
-        await db.execute(PEOPLE_SCHEMA)
         cur = await db.execute(
             "SELECT display_name FROM people WHERE author_id = ? AND display_name = ? LIMIT 1",
             (author_id, name))
