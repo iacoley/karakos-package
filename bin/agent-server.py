@@ -2849,7 +2849,7 @@ async def crash_recovery():
             channel_id = msg["channel_id"]
             agent = msg["agent"]
             if channel_id != "0":
-                crash_msg = f"⚠️ {agent} crashed while processing message from {msg['author']}"
+                crash_msg = f"⚠️ {agent} crashed while processing message from {identity.display_name(msg['author'])}"
                 await post_to_discord(agent, channel_id, crash_msg)
 
         await db.commit()
@@ -3110,7 +3110,7 @@ async def handle_message_edit(request):
 
     if decision.action in ("followup", "update_followup"):
         text = discord_ux.edit_followup_text(
-            row["author"], row["content"], content, decision.phase)
+            identity.display_name(row["author"]), row["content"], content, decision.phase)
         if decision.action == "update_followup":
             cur = await db.execute(
                 "UPDATE message_queue SET content = ? WHERE message_id = ? AND processed = 0",
@@ -3813,7 +3813,7 @@ async def handle_agent_queue(request):
             "id": row["id"],
             "agent": row["agent"],
             "channel": row["channel"],
-            "author": row["author"],
+            "author": identity.display_name(row["author"]),
             "content": content[:QUEUE_PREVIEW_CHARS],
             "content_full_length": len(content),
             "created_at": row["created_at"],

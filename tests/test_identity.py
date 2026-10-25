@@ -133,3 +133,25 @@ def test_server_records_people_per_server_and_notes_a_new_name(harness):
     assert authors["m3"] == "Alice"
     assert authors["m4"] == "a bot"
     assert [(p["guild_id"], p["display_name"]) for p in people] == [("G1", "alice_old"), ("G2", "Alice")]
+
+
+def test_display_name_drops_the_rename_note():
+    assert identity.display_name(identity.compose_author("Alice", "alice_old")) == "Alice"
+    assert identity.display_name("Alice") == "Alice"
+    assert identity.display_name(None) == ""
+
+
+def test_queue_api_shows_the_plain_name_not_the_joined_field(harness):
+    h = harness(agents=["a"], steering={"enabled": False})
+
+    async def scenario():
+        async with h:
+            h.script(default={"text": "ok", "delay_ms": 4000})
+            await _put(h, "m1", "alice_old", IAN, "G1")
+            await _put(h, "m2", "Alice", IAN, "G2")
+            r = await h.client.get("/agents/a/queue", headers=h._headers())
+            return await r.json()
+    body = run(scenario())
+    authors = [m["author"] for m in body["messages"]]
+    assert "Alice" in authors
+    assert not any("\x1f" in a for a in authors), authors

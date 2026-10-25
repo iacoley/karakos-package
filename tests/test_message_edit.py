@@ -17,10 +17,10 @@ def run(coro):
     return asyncio.run(coro)
 
 
-async def put(h, mid, text, shard="a", author_id="7", channel="general"):
+async def put(h, mid, text, shard="a", author_id="7", channel="general", author="sam"):
     r = await h.client.post("/message", headers=h._headers(), json={
         "agent": "a", "shard": shard, "content": text, "channel": channel, "channel_id": "1",
-        "server": "local", "author": "sam", "author_id": author_id, "message_id": mid})
+        "server": "local", "author": author, "author_id": author_id, "message_id": mid})
     assert r.status == 202, await r.text()
 
 
@@ -257,3 +257,23 @@ def test_edit_of_a_steered_message_is_a_followup_that_runs_next(harness):
     assert h.module.STATE.steered_total.get("a") == 1             # only m2 was steered
     assert "second, edited" in h.sent_to("a")[-1]                 # the model saw it
     assert row(h, "m2")["processed"] == 2 and row(h, "m1")["processed"] == 2
+
+
+def test_followup_names_the_author_without_the_rename_note(harness):
+    h = harness(agents=["a", "b"], shards=SHARDS)
+
+    async def scenario():
+        async with h:
+            h.module.channels_config = UX
+            busy_script(h)
+            await put(h, "m0", "first", shard="a-2", author="alice_old")
+            await h.wait_for(lambda: row(h, "m0")["processed"] == 1)
+            await put(h, "m1", "hello wrld", shard="a-2", author="Alice")   # a renamed sender
+            assert "\x1f" in row(h, "m1")["author"]
+            await h.wait_for(lambda: row(h, "m1")["processed"] == 1)
+            assert (await edit(h, "m1", "hello world"))["status"] == "followup"
+            (f,) = followups(h, "m1")
+            assert f["content"].startswith("[Alice edited their earlier message")
+            assert "\x1f" not in f["content"]
+            await h.wait_idle("a-2", timeout=10)
+    run(scenario())

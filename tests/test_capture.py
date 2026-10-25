@@ -190,6 +190,22 @@ class TestBackfill:
         assert entries[0]["author_name"] == "mike"
         assert entries[0]["channel_name"] == "general"
 
+    def test_backfill_exports_the_plain_name_not_the_rename_note(self, tmp_workspace, monkeypatch):
+        capture, agent_server = self._modules(tmp_workspace, monkeypatch)
+        asyncio.run(_init_and_close(agent_server))
+        conn = sqlite3.connect(str(agent_server.DB_PATH))
+        conn.execute(
+            "INSERT INTO message_queue (agent, channel, channel_id, server, author, "
+            "author_id, is_bot, content, message_id, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("amos", "general", "123", "discord", "Alice\x1falice_old", "42", 0,
+             "hi", "m-1", "2026-04-10 09:00:00"))
+        conn.commit()
+        conn.close()
+        capture.backfill("2026-04-10")
+        log_file = tmp_workspace / "data" / "messages" / "messages-2026-04-10.jsonl"
+        assert json.loads(log_file.read_text().strip())["author_name"] == "Alice"
+
     def test_backfill_exits_when_database_is_absent(self, tmp_workspace, monkeypatch):
         capture, _ = self._modules(tmp_workspace, monkeypatch)
         with pytest.raises(SystemExit) as exc:
@@ -202,3 +218,4 @@ async def _init_and_close(agent_server):
     await agent_server.init_db()
     await agent_server.db.close()
     agent_server.db = None
+

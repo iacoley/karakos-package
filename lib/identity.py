@@ -47,6 +47,13 @@ def compose_author(name, previous=None) -> str:
     return f"{name}{_SEP}{previous}" if previous else name
 
 
+def display_name(author) -> str:
+    """The name part of a stored author, without the rename note. Use this
+    wherever a queue row's `author` is shown or exported as a plain name; the
+    raw field is only for copying a row (it keeps the note)."""
+    return str(author or "").partition(_SEP)[0]
+
+
 def label(name, author_id, trusted=False) -> str:
     """`Name (id 123…)`, with ` (previously Old)` after it when `name` came
     from `compose_author` (`trusted=True`, queue rows only). Just the name when
