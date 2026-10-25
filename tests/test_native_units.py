@@ -24,7 +24,7 @@ def test_stop_timeouts_match_supervisord():
 
 
 def test_render(tmp_path):
-    units = native_units.render(str(tmp_path), "/venv/bin/python")
+    units = native_units.render(str(tmp_path), "/venv/bin/python", path="/usr/bin:/bin")
     assert set(units) == {f"karakos-{n}.service" for n in native_units.PROGRAMS} | {"karakos.target"}
     srv = units["karakos-agent-server.service"]
     # env(1) sets the root so an EnvironmentFile (config/.env) cannot override it
