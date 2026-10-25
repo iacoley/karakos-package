@@ -107,6 +107,7 @@ def tools(workspace):
     module = _load("tools_ask_under_test", TOOLS_SERVER, workspace)
     module.AGENT_SERVER_TOKEN = TOKEN
     module.KARAKOS_AGENT = "amos"
+    module.KARAKOS_SHARD = ""
     module.ASK_POLL_INTERVAL_SEC = 0.02
     return module
 
