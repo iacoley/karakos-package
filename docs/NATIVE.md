@@ -24,6 +24,10 @@ make upgrade-native                       # fast-forward the current branch
 KARAKOS_REF=v2.5.0 make upgrade-native    # or a tag
 ```
 
+A tag leaves the checkout on a detached HEAD. That is expected: the next plain `make upgrade-native`
+refuses to fast-forward a detached checkout, so pass `KARAKOS_REF=<branch>` (for example `main`) to
+return to a branch.
+
 `bin/native-upgrade.sh` stops if tracked files have local changes, moves the checkout,
 refreshes the venv and dashboard, re-runs the bootstrap and restarts the units.
 Schema changes still go through `karakos migrate`; the bootstrap refuses data that needs it.

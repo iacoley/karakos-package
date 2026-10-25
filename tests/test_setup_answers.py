@@ -160,7 +160,8 @@ def test_install_sh_pins_main_and_passes_answers_through():
     clones = re.findall(r"^\s*git clone .*$", s, re.M)
     assert clones and all('--branch "$KARAKOS_BRANCH"' in c for c in clones), clones
     assert "--answers" in s and "KARAKOS_ANSWERS" in s
-    assert './setup.sh --answers "$ANSWERS_FILE"' in s
+    assert 'SETUP_ARGS+=(--answers "$ANSWERS_FILE")' in s
+    assert './setup.sh ${SETUP_ARGS[@]+"${SETUP_ARGS[@]}"}' in s
 
 
 def test_install_ps1_pins_main():
