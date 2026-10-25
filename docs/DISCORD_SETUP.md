@@ -109,7 +109,7 @@ If you want each agent to post under its own identity:
    ```
 5. In `config/agents.yaml`, set each agent's `discord.token_env` and `discord.bot_id_env`
    (and `discord.role_id_env` if you want a Discord role to address the agent; see
-   `mention_only` below)
+   `mention_only` below). The variable it names may hold several role ids separated by commas
 
 Without multi-bot setup, all agents post through the primary bot.
 
@@ -228,8 +228,10 @@ agents:
 ```
 
 and in `config/.env`, `DISCORD_ROLE_ID_MAIN=<role id>`. A mention of a mapped
-role routes to that agent the same way a mention of its bot does. A role mention
-with no mapped agent is ignored.
+role routes to that agent the same way a mention of its bot does. The variable
+may hold several role ids, separated by commas. A role mention with no mapped
+agent is ignored. One role wakes one agent: if two agents list the same role id,
+the first loaded keeps it and the relay logs a warning.
 
 ```json
 "front-desk": { "id": "...", "default_agent": "main", "mention_only": true }

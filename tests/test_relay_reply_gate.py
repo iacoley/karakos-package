@@ -541,6 +541,74 @@ def test_role_id_env_is_read_from_the_registry_into_the_relay_map(relay, monkeyp
     assert relay.discord_role_id_to_agent == {ROLE_ID: "amos"}
 
 
+def test_role_id_env_accepts_several_ids_and_ignores_bad_parts(relay, monkeypatch, tmp_path):
+    import registry
+    monkeypatch.setenv("DISCORD_ROLE_ID_AMOS", f"{ROLE_ID}, {ROLE_ID + 1} nope,{ROLE_ID}")
+    monkeypatch.setattr(relay.agent_registry, "load_registry", lambda ws: registry.parse_registry({
+        "version": 2, "agents": {
+            "amos": {"name": "amos", "role": "primary",
+                     "discord": {"role_id_env": "DISCORD_ROLE_ID_AMOS"},
+                     "shards": [{"id": "amos", "channels": []}]},
+            "kothar": {"name": "kothar", "role": "monitor"}}}))
+    monkeypatch.setattr(relay, "discord_id_to_agent", {})
+    monkeypatch.setattr(relay, "discord_role_id_to_agent", {})
+    monkeypatch.setattr(relay, "CHANNELS_CONFIG_PATH", tmp_path / "channels.json")
+
+    relay.load_config()
+
+    assert relay.discord_role_id_to_agent == {ROLE_ID: "amos", ROLE_ID + 1: "amos"}
+
+
+def _two_agent_registry(registry):
+    def agent(n):
+        return {"name": n, "role": "primary" if n == "amos" else "custom",
+                "discord": {"role_id_env": "DISCORD_ROLE_ID_" + n.upper()},
+                "shards": [{"id": n, "channels": []}]}
+    return registry.parse_registry({"version": 2, "agents": {
+        "amos": agent("amos"), "kothar": agent("kothar"), "mon": {"name": "mon", "role": "monitor"}}})
+
+
+def test_shared_role_warns_and_first_agent_keeps_it(relay, monkeypatch, tmp_path, caplog):
+    import logging
+    import registry
+    monkeypatch.setenv("DISCORD_ROLE_ID_AMOS", str(ROLE_ID))
+    monkeypatch.setenv("DISCORD_ROLE_ID_KOTHAR", f"{ROLE_ID},{ROLE_ID + 1}")
+    reg = _two_agent_registry(registry)
+    monkeypatch.setattr(relay.agent_registry, "load_registry", lambda ws: reg)
+    monkeypatch.setattr(relay, "discord_id_to_agent", {})
+    monkeypatch.setattr(relay, "discord_role_id_to_agent", {})
+    monkeypatch.setattr(relay, "CHANNELS_CONFIG_PATH", tmp_path / "channels.json")
+    with caplog.at_level(logging.WARNING, logger="relay"):
+        relay.load_config()
+    assert relay.discord_role_id_to_agent == {ROLE_ID: "amos", ROLE_ID + 1: "kothar"}
+    assert any("set for both amos and kothar" in r.message for r in caplog.records)
+
+
+def test_non_numeric_role_id_is_warned_not_silent(relay, monkeypatch, tmp_path, caplog):
+    import logging
+    import registry
+    monkeypatch.setenv("DISCORD_ROLE_ID_AMOS", f"{ROLE_ID},oops")
+    monkeypatch.setenv("DISCORD_ROLE_ID_KOTHAR", "")
+    reg = _two_agent_registry(registry)
+    monkeypatch.setattr(relay.agent_registry, "load_registry", lambda ws: reg)
+    monkeypatch.setattr(relay, "discord_id_to_agent", {})
+    monkeypatch.setattr(relay, "discord_role_id_to_agent", {})
+    monkeypatch.setattr(relay, "CHANNELS_CONFIG_PATH", tmp_path / "channels.json")
+    with caplog.at_level(logging.WARNING, logger="relay"):
+        relay.load_config()
+    assert relay.discord_role_id_to_agent == {ROLE_ID: "amos"}
+    assert any("non-numeric role id 'oops'" in r.message for r in caplog.records)
+
+
+def test_parse_role_ids():
+    import routing
+    assert routing.parse_role_ids("123") == [123]
+    seen = []
+    assert routing.parse_role_ids("1,2 3,,x", on_invalid=seen.append) == [1, 2, 3]
+    assert seen == ["x"]
+    assert routing.parse_role_ids("") == [] and routing.parse_role_ids(None) == []
+
+
 # ---------------------------------------------------------------------------
 # #131 — the gate is on by default for channels with two or more agents
 # ---------------------------------------------------------------------------

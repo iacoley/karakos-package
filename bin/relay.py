@@ -649,9 +649,17 @@ def load_config():
                 discord_id_to_agent[int(bot_id)] = agent_name
         role_id_env = config.get("discord_role_id_env")
         if role_id_env:
-            role_id = os.environ.get(role_id_env)
-            if role_id:
-                discord_role_id_to_agent[int(role_id)] = agent_name
+            for role_id in routing.parse_role_ids(
+                    os.environ.get(role_id_env),
+                    on_invalid=lambda bad, _a=agent_name, _e=role_id_env: log.warning(
+                        "agent %s: %s holds a non-numeric role id %r; ignored", _a, _e, bad)):
+                owner = discord_role_id_to_agent.get(role_id)
+                if owner and owner != agent_name:
+                    # One role wakes one agent. The first agent loaded keeps it.
+                    log.warning("role %s is set for both %s and %s; only %s will wake on it",
+                                role_id, owner, agent_name, owner)
+                    continue
+                discord_role_id_to_agent[role_id] = agent_name
 
     for name, cfg in (channels_config.get("channels") or {}).items():
         if isinstance(cfg, dict) and cfg.get("mention_only") is True and cfg.get("reply_gate"):
