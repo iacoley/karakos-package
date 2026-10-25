@@ -85,4 +85,4 @@ bin/native-migrate.sh            # cp -a each volume into the checkout, drops WO
 bin/native-bootstrap.sh
 ```
 
-The script refuses to run while the container is up or when `data/`, `logs/` or `inbox/` already hold files. It never deletes the volumes (`config_karakos-data`, `config_karakos-logs`, `config_karakos-inbox` for the default project): keep them, and the stopped container, for a day on native before removing them. To roll back, start the container again.
+The copy runs as root inside a throwaway container and the files are then `chown`ed to the user who ran the script, so the host uid does not have to match the image's. The script refuses to run while the container is up or when `data/`, `logs/` or `inbox/` already hold files; `--move-aside` renames such a directory to `<dir>.pre-native.<time>` first (a stale `data/build-queue.db` from an earlier host run is the usual case). It never deletes the volumes (`config_karakos-data`, `config_karakos-logs`, `config_karakos-inbox` for the default project): keep them, and the stopped container, for a day on native before removing them. To roll back, start the container again.

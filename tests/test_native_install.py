@@ -1,3 +1,4 @@
+import os
 import re
 import shutil
 import subprocess
@@ -142,8 +143,19 @@ def test_migrate_copies_three_volumes_and_fixes_env(tmp_path):
     r = _run_migrate(ws, env)
     assert r.returncode == 0, r.stderr
     runs = [l for l in log.read_text().splitlines() if l.startswith("run ")]
-    assert len(runs) == 3 and all("karakos:test" in l and "--entrypoint cp" in l and "-a /from/." in l for l in runs)
+    assert len(runs) == 3 and all("karakos:test" in l and "--user 0:0" in l and "--entrypoint sh" in l and "cp -a /from/." in l and "chown -R" in l and l.rstrip().endswith(f"{os.getuid()} {os.getgid()}") for l in runs)
     for kind in ("data", "logs", "inbox"):
         assert any(f"config_karakos-{kind}:/from:ro" in l for l in runs)
     assert (ws / "config" / ".env").read_text() == "FOO=1\n"
     assert not any(l.startswith(("volume rm", "rm ")) for l in log.read_text().splitlines())
+
+
+def test_migrate_move_aside_renames_existing_target(tmp_path):
+    ws, env, log = _migrate_ws(tmp_path)
+    (ws / "data").mkdir()
+    (ws / "data" / "build-queue.db").write_text("stale")
+    r = _run_migrate(ws, env, "--move-aside")
+    assert r.returncode == 0, r.stderr
+    moved = [p for p in ws.iterdir() if p.name.startswith("data.pre-native.")]
+    assert len(moved) == 1 and (moved[0] / "build-queue.db").read_text() == "stale"
+    assert not (ws / "data" / "build-queue.db").exists()
