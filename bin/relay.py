@@ -973,7 +973,8 @@ class DiscordAdapter(discord.Client):
         if not OUTAGE_ALERT_WEBHOOK_URL:
             log.warning("outage alert (no OUTAGE_ALERT_WEBHOOK_URL set): %s", text)
             return True
-        ok = gateway_watch.post_webhook(OUTAGE_ALERT_WEBHOOK_URL, text)
+        ok = gateway_watch.post_webhook(OUTAGE_ALERT_WEBHOOK_URL, text,
+                                        title=f"{self.gateway_watch.name} relay")
         if not ok:
             log.warning("outage alert not delivered, will retry: %s", text)
         return ok

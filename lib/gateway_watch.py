@@ -115,13 +115,14 @@ def dead_letter_count(outbox_db: Path) -> Optional[int]:
         return None
 
 
-def post_webhook(url: str, text: str, timeout: float = 10.0) -> bool:
-    """POST `text` to a webhook; True on a 2xx. Never raises."""
+def post_webhook(url: str, text: str, timeout: float = 10.0, title: str = "Karakos relay") -> bool:
+    """POST `text` to a webhook; True on a 2xx. Never raises. `title` rides the ntfy-style
+    Title header, so the alert names the install that sent it."""
     if not url.lower().startswith(("http://", "https://")):
         return False
     req = urllib.request.Request(url, data=text.encode("utf-8"), method="POST",
                                  headers={"Content-Type": "text/plain; charset=utf-8",
-                                          "Title": "Karakos relay"})
+                                          "Title": title})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
             return 200 <= resp.status < 300

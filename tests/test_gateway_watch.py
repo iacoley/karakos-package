@@ -84,6 +84,22 @@ def test_dead_letter_count_reads_the_outbox_read_only(tmp_path):
     assert gw.dead_letter_count(db) is None
 
 
+def test_webhook_sends_the_title_header(monkeypatch):
+    seen = {}
+
+    class Resp:
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    def fake_urlopen(req, timeout):
+        seen["title"] = req.get_header("Title")
+        return Resp()
+    monkeypatch.setattr(gw.urllib.request, "urlopen", fake_urlopen)
+    assert gw.post_webhook("https://hook.invalid/x", "down", title="home relay") is True
+    assert seen["title"] == "home relay"
+
+
 def test_webhook_rejects_non_http_urls_and_survives_errors():
     assert gw.post_webhook("file:///etc/passwd", "x") is False
     assert gw.post_webhook("http://127.0.0.1:9/none", "x", timeout=1) is False
@@ -116,7 +132,7 @@ def relay(tmp_path_factory):
 def test_relay_gateway_events_drive_the_watch_and_the_alert_leaves_by_webhook(relay, monkeypatch):
     sent = []
     monkeypatch.setattr(relay, "OUTAGE_ALERT_WEBHOOK_URL", "http://hook.invalid/x")
-    monkeypatch.setattr(relay.gateway_watch, "post_webhook", lambda url, text, timeout=10.0: sent.append((url, text)) or True)
+    monkeypatch.setattr(relay.gateway_watch, "post_webhook", lambda url, text, timeout=10.0, title="": sent.append((url, text, title)) or True)
     monkeypatch.setattr(relay.gateway_watch, "dead_letter_count", lambda p: None)
     clock = [1000.0]
     monkeypatch.setattr(relay.time, "time", lambda: clock[0])
@@ -136,7 +152,7 @@ def test_relay_gateway_events_drive_the_watch_and_the_alert_leaves_by_webhook(re
         await a.close()
 
     asyncio.run(go())
-    assert all(u == "http://hook.invalid/x" for u, _ in sent)
+    assert all(u == "http://hook.invalid/x" and t == "home relay" for u, _, t in sent)
 
 
 def test_relay_without_a_webhook_logs_and_does_not_retry_forever(relay, monkeypatch, caplog):
