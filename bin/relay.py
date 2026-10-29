@@ -39,6 +39,7 @@ import build_dispatcher  # noqa: E402
 import build_hosts  # noqa: E402
 import channel_context  # noqa: E402
 import discord_ux  # noqa: E402
+import gateway_watch  # noqa: E402
 import registry as agent_registry  # noqa: E402
 import reply_classifier  # noqa: E402
 import reply_gate_config  # noqa: E402
@@ -542,6 +543,15 @@ DEFERRED_MESSAGES_DIR = WORKSPACE_ROOT / "data" / "deferred-messages"
 HEALTH_FILE = WORKSPACE_ROOT / "data" / "health" / "relay.json"
 HEALTH_INTERVAL_S = 60
 
+# Off-Discord alert when the gateway stays down or posts keep dying (lib/gateway_watch.py).
+# OUTAGE_ALERT_WEBHOOK_URL is where it goes (a text POST: ntfy, Gotify, Slack-style);
+# unset means the relay only logs the message. OUTAGE_ALERT_AFTER_S is how long the
+# gateway may be down first.
+OUTAGE_ALERT_WEBHOOK_URL = os.environ.get("OUTAGE_ALERT_WEBHOOK_URL", "").strip()
+OUTAGE_ALERT_AFTER_S = float(os.environ.get("OUTAGE_ALERT_AFTER_S", str(gateway_watch.DEFAULT_THRESHOLD_S)))
+OUTAGE_CHECK_INTERVAL_S = 30
+OUTBOX_DB = WORKSPACE_ROOT / "data" / "outbox" / "outbox.db"
+
 # Attachments the relay will pull down before handing a message to an agent.
 # Discord's own ceiling is 25 MB on an unboosted server, so the default cap
 # refuses nothing Discord would have accepted while still bounding what a
@@ -918,12 +928,18 @@ class DiscordAdapter(discord.Client):
         self.presence = PresenceTracker()
         self._presence_task = None
         self._health_task = None
+        self._outage_task = None
+        self.gateway_watch = gateway_watch.GatewayWatch(
+            os.environ.get("SYSTEM_NAME", "Karakos"), OUTAGE_ALERT_AFTER_S, now=time.time())
 
     async def setup_hook(self):
         """Initialize HTTP session"""
         import aiohttp
         self.http_session = aiohttp.ClientSession()
         self.server_ids = load_server_ids(channels_config)
+        # Started here, not in on_ready: a relay that never logs in is the case to report.
+        if self._outage_task is None or self._outage_task.done():
+            self._outage_task = asyncio.create_task(self.outage_loop())
         log.info(
             "Discord adapter initialized (servers: %s)",
             ", ".join(sorted(self.server_ids)) or "none configured",
@@ -936,14 +952,47 @@ class DiscordAdapter(discord.Client):
         if self._health_task is None or self._health_task.done():
             self._health_task = asyncio.create_task(self.health_loop())
         self.start_presence_loop()
+        self.gateway_watch.up(time.time())
 
     async def on_resumed(self):
         """Gateway session resumed — presence may not have survived."""
         self.presence.reset()
+        self.gateway_watch.up(time.time())
 
     async def on_connect(self):
         """New gateway connection — Discord holds no presence for it yet."""
         self.presence.reset()
+        self.gateway_watch.up(time.time())
+
+    async def on_disconnect(self):
+        """Gateway connection lost; the outage watch starts its clock."""
+        self.gateway_watch.down(time.time())
+
+    def outage_send(self, text: str) -> bool:
+        """Deliver an outage message off Discord. No webhook: log it and call it sent."""
+        if not OUTAGE_ALERT_WEBHOOK_URL:
+            log.warning("outage alert (no OUTAGE_ALERT_WEBHOOK_URL set): %s", text)
+            return True
+        ok = gateway_watch.post_webhook(OUTAGE_ALERT_WEBHOOK_URL, text)
+        if not ok:
+            log.warning("outage alert not delivered, will retry: %s", text)
+        return ok
+
+    async def outage_tick(self):
+        """One watch pass; the webhook post runs in a thread so it never stalls the loop."""
+        dead = gateway_watch.dead_letter_count(OUTBOX_DB)
+        watch = self.gateway_watch
+        for alert in watch.tick(time.time(), dead):
+            if await asyncio.to_thread(self.outage_send, alert.text):
+                watch.delivered(alert)
+
+    async def outage_loop(self):
+        while True:
+            try:
+                await self.outage_tick()
+            except Exception as e:
+                log.warning("outage watch error: %s", e)
+            await asyncio.sleep(OUTAGE_CHECK_INTERVAL_S)
 
     def start_presence_loop(self):
         if not PRESENCE_ENABLED:
@@ -2192,6 +2241,8 @@ class DiscordAdapter(discord.Client):
             self._health_task.cancel()
         if self._presence_task:
             self._presence_task.cancel()
+        if self._outage_task:
+            self._outage_task.cancel()
         if self.http_session:
             await self.http_session.close()
         await super().close()

@@ -268,6 +268,18 @@ gates:
 - **`GuestBudget`** — caps how many turns a *bot* author can consume, 12 by
   default, refilled when a human speaks.
 
+**Gateway outage alert** (`lib/gateway_watch.py`). The relay is the one process
+that can tell Discord is unreachable; an agent behind a dead link just stops
+getting turns. The relay posts a message *off Discord* when the gateway has been
+down past `OUTAGE_ALERT_AFTER_S` (default 300) or when the outbox's dead-letter
+count rises. It sends one message per outage and one line on recovery. It goes
+to `OUTAGE_ALERT_WEBHOOK_URL`, a plain-text HTTP POST that ntfy, Gotify and
+Slack-style endpoints accept; with it unset the relay only logs the message. A
+failed delivery is retried on the next 30-second pass and never repeated once it
+lands. A relay that boots and never logs in counts as down from process start.
+Limit: a webhook cannot get out when the whole uplink is dead, so point it at a
+route that does not share that uplink.
+
 ## Scheduler (`bin/scheduler.py`)
 
 Replaces cron, with the container's full environment. The loop ticks every
