@@ -43,6 +43,7 @@ import ask_handler  # noqa: E402
 import cross_send  # noqa: E402
 import identity  # noqa: E402
 import discord_ux  # noqa: E402
+import discord_embeds  # noqa: E402
 import hive as hive_lib  # noqa: E402
 import msgqueue  # noqa: E402
 import outbox as outbox_lib  # noqa: E402
@@ -1772,8 +1773,14 @@ def split_discord_message_visible(text: str) -> List[str]:
     return [c for c in split_discord_message(text) if post_guard.has_visible(c)]
 
 
+def _embed_only_chunk(chunks: List[str], embeds) -> List[str]:
+    """A reply that is only embeds rides on one empty chunk (no content sent)."""
+    return chunks or ([""] if embeds else [])
+
+
 async def _post_direct(agent: str, token: str, channel_id: str, content: str,
-                       reply_to: Optional[str] = None, flags: int = 0) -> Optional[str]:
+                       reply_to: Optional[str] = None, flags: int = 0,
+                       embeds: Optional[List[Dict[str, Any]]] = None) -> Optional[str]:
     """Direct, in-turn delivery: retried POST_MAX_ATTEMPTS times per chunk.
 
     Used for incidental posts (tool lines, notices) and as the fallback when
@@ -1786,7 +1793,8 @@ async def _post_direct(agent: str, token: str, channel_id: str, content: str,
         "Authorization": f"Bot {token}",
         "Content-Type": "application/json"
     }
-    chunks = [c for c in split_discord_message(content) if post_guard.has_visible(c)]
+    chunks = _embed_only_chunk(
+        [c for c in split_discord_message(content) if post_guard.has_visible(c)], embeds)
     if not chunks:
         log.info(f"skip post (empty) agent={agent} channel={channel_id}")
         return None
@@ -1794,7 +1802,9 @@ async def _post_direct(agent: str, token: str, channel_id: str, content: str,
     failed = 0
 
     for idx, chunk in enumerate(chunks):
-        payload = {"content": chunk}
+        payload: Dict[str, Any] = {"content": chunk} if chunk else {}
+        if embeds and idx == len(chunks) - 1:
+            payload["embeds"] = embeds
         if flags:
             payload["flags"] = flags
         # Only reply-reference the first chunk
@@ -1921,7 +1931,9 @@ async def outbox_send_row(row: Dict[str, Any]) -> Optional[str]:
         outbox_lib.record_failure(conn, rid, "retry", None, "no Discord token configured",
                                   None, _outbox_now())
         return None
-    chunks = [c for c in split_discord_message(row["content"]) if post_guard.has_visible(c)]
+    embeds = json.loads(row.get("embeds") or "[]")
+    chunks = _embed_only_chunk(
+        [c for c in split_discord_message(row["content"]) if post_guard.has_visible(c)], embeds)
     if not chunks:
         log.info(f"skip post (empty) agent={agent} channel={channel_id}")
         outbox_lib.record_failure(conn, rid, "permanent", None, "empty after chunking", None,
@@ -1932,10 +1944,13 @@ async def outbox_send_row(row: Dict[str, Any]) -> Optional[str]:
     ids = json.loads(row.get("message_ids") or "[]")
     for idx in range(row.get("chunks_done") or 0, len(chunks)):
         payload: Dict[str, Any] = {
-            "content": chunks[idx],
             "nonce": f"{rid[3:15]}-{idx}",
             "enforce_nonce": True,
         }
+        if chunks[idx]:
+            payload["content"] = chunks[idx]
+        if embeds and idx == len(chunks) - 1:
+            payload["embeds"] = embeds
         if idx == 0 and row.get("reply_to"):
             payload["message_reference"] = {"message_id": row["reply_to"]}
         if row.get("flags"):
@@ -2287,19 +2302,27 @@ async def post_to_discord(agent: str, channel_id: str, content: str,
     # Discord does not render Markdown tables; turn them into a monospace
     # block first (no PNG: this path only sends JSON). Rendering can empty a
     # message, so the guard runs on the rendered text.
-    rendered, _ = tengwar.render_for_discord(content)
+    # Fenced `embed` blocks become Discord embeds on the durable reply path only
+    # (RADAGAST-A). The outbox row's sha still hashes `content`, as before.
+    ux = ux_for_channel_id(channel_id)
+    prose, embeds = discord_embeds.split_reply(
+        content, dead_letter and ux.embeds and not ux.suppress_embeds)
+
+    rendered, _ = tengwar.render_for_discord(prose)
     ok, reason = post_guard.post_decision(rendered)
     if not ok:
-        log.info(f"skip post ({reason}) agent={agent} channel={channel_id}")
-        return None
+        if not embeds:
+            log.info(f"skip post ({reason}) agent={agent} channel={channel_id}")
+            return None
+        rendered = ""   # the embeds carry the reply; blank or PASS prose is not posted
     rendered = prefix + rendered
-    chunks = split_discord_message_visible(rendered)
+    chunks = _embed_only_chunk(split_discord_message_visible(rendered), embeds)
     if not chunks:
         log.info(f"skip post (empty) agent={agent} channel={channel_id}")
         return None
 
     # Suppress-embeds (6.2): text posts only; post_discord_payload never sets it.
-    flags = discord_ux.SUPPRESS_EMBEDS if ux_for_channel_id(channel_id).suppress_embeds else 0
+    flags = discord_ux.SUPPRESS_EMBEDS if ux.suppress_embeds else 0
 
     if dead_letter:
         conn = _outbox_store()
@@ -2311,7 +2334,7 @@ async def post_to_discord(agent: str, channel_id: str, content: str,
                     now=_outbox_now(), content_sha=outbox_lib.content_sha(content),
                     chunks_total=len(chunks),
                     queue_message_id=queue_message_id,
-                    attachments=attachments)
+                    attachments=attachments, embeds=embeds or None)
             except Exception as e:
                 _outbox_broken("enqueue", e)
             else:
@@ -2328,7 +2351,7 @@ async def post_to_discord(agent: str, channel_id: str, content: str,
                     _outbox_broken("inline send", e)
                     return None
 
-    return await _post_direct(agent, token, channel_id, rendered, reply_to, flags)
+    return await _post_direct(agent, token, channel_id, rendered, reply_to, flags, embeds)
 
 
 def gateway_agent() -> Optional[str]:

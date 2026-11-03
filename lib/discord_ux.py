@@ -1,9 +1,11 @@
 """Optional Discord behaviours (step 6.2). Pure and stdlib only.
 
-Six switches, read from config/channels.json. Four are off by default;
+Seven switches, read from config/channels.json. Four are off by default;
 `tool_streaming` is a per-channel override of the agent's own setting
 (channel > agent `tool_streaming` in agents.yaml > default True); `reactions`
-(the agent may answer with `REACT: <emoji>`) is on by default:
+(the agent may answer with `REACT: <emoji>`) and `embeds` (a fenced `embed`
+block in a reply posts as Discord embeds, see lib/discord_embeds.py) are on by
+default:
 
     {"ux": {"suppress_embeds": true},
      "channels": {"general": {"id": "...", "ux": {"threads": {"after_s": 60},
@@ -27,7 +29,7 @@ import post_guard
 SUPPRESS_EMBEDS = 4
 
 KEYS = ("threads", "reaction_notices", "edit_reroute", "suppress_embeds", "tool_streaming",
-        "reactions")
+        "reactions", "embeds")
 
 THREAD_AFTER_S = 60
 THREAD_MAX_LINES = 40
@@ -59,6 +61,7 @@ class ChannelUx:
     suppress_embeds: bool = False
     tool_streaming: Optional[bool] = None       # None: inherit the agent's setting
     reactions: bool = True                      # agent may react with an emoji (on by default)
+    embeds: bool = True                         # fenced `embed` blocks post as embeds (on by default)
 
 
 def _num(v, positive=True):
@@ -128,12 +131,15 @@ _PARSERS = {
     "suppress_embeds": _parse_bool,
     "tool_streaming": _parse_tool_streaming,
     "reactions": _parse_bool,
+    "embeds": _parse_bool,
 }
 # What a bad value becomes, and what an unset key means. Every key is off when
-# unset except `reactions`, which is on by default; a bad value still turns it off.
+# unset except `reactions` and `embeds`, which are on by default; a bad value
+# still turns it off.
 _OFF = {"threads": None, "reaction_notices": None, "edit_reroute": None,
-        "suppress_embeds": False, "tool_streaming": None, "reactions": False}
-_UNSET = {**_OFF, "reactions": True}
+        "suppress_embeds": False, "tool_streaming": None, "reactions": False,
+        "embeds": False}
+_UNSET = {**_OFF, "reactions": True, "embeds": True}
 
 
 def _parse_block(block, where: str, warnings: List[str]) -> Dict[str, Any]:

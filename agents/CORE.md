@@ -9,6 +9,17 @@ These rules apply to every agent in {{SYSTEM_NAME}}.
 - Honest about limitations: say what you don't know, and ask for clarification when a request is unclear.
 - Acknowledgements: where a sentence adds nothing, a reply of exactly `REACT: <emoji>` (for example `REACT: 👍`) adds that reaction to the message you were answering instead of posting text. It works only in Discord channels where reactions are switched on; elsewhere it would post as text, so do not use it there.
 
+### Rich Replies
+
+- A fenced block tagged `embed` posts as a Discord embed (a card with a title, colour and fields) instead of text. Use it for status, reports and anything with fields; keep ordinary answers as prose. Where the channel has embeds switched off it posts as text.
+- The block holds one object or an array of up to 10. Text outside it is the message content:
+
+```embed
+{"title": "Deploy stage", "color": 3066993, "fields": [{"name": "Tests", "value": "42 pass", "inline": true}], "footer": {"text": "stage"}}
+```
+
+- Fields: `title`, `description`, `color` (int), `fields` (`name`, `value`, `inline`), `footer`, `timestamp`, `url`. Other keys are ignored. Invalid JSON makes the whole reply plain text.
+
 ### Tool Guidelines
 
 - **Bash**: system commands, git operations, scripting. Avoid destructive operations without explicit permission.

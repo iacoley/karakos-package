@@ -211,7 +211,8 @@ block from it, and top facts load at session start; semantic search runs on
 local embeddings, so recall costs no API calls.
 
 **Delivery.** Discord replies go through a durable **outbox** with retries and an
-audit trail, so a Discord outage delays an answer instead of losing it.
+audit trail, so a Discord outage delays an answer instead of losing it. An agent can
+answer with rich embeds by putting a fenced `embed` block in its reply.
 
 **Cost control.** Every turn's spend is recorded per agent. Daily and monthly
 caps are enforced at the point a message is queued, and warnings post to your
