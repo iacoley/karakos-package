@@ -14,6 +14,10 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Self-upgrade for Docker installs. `bin/self-upgrade.sh request [latest|vX.Y|vX.Y.Z]` (inside the container) writes a request to the bind-mounted `.karakos/upgrade/`; `bin/upgrade-agent.sh`, run every minute from the host crontab (`make install-upgrade-agent`, also run by `make install`; `make uninstall-upgrade-agent` removes it), pulls, pins `KARAKOS_VERSION`, runs `make pull/down/up`, health-checks for up to 180 s and rolls back to the previous image on failure. An exit 78 is reported as `needs-migrate`; `karakos migrate` never runs automatically. The entrypoint runs `self-upgrade.sh report` to tell the requesting agent the result. The container still gets no Docker socket. `bin/check-updates.sh` mentions the command in its release notice.
+
 ## [2.5.0] - 2026-10-29
 
 ### Added

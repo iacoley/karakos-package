@@ -521,6 +521,55 @@ Back up first (`bin/karakos migrate` does it for you when a migration is due),
 read the release notes for the version you are moving to, and bump
 `KARAKOS_VERSION` if you pinned it.
 
+### Self-upgrade
+
+A Docker install can upgrade on request from inside. The container has no
+Docker socket (on purpose), so a small agent on the host does the work.
+
+One time, on the host, from the checkout:
+
+```bash
+make install-upgrade-agent
+```
+
+This adds a per-minute line to your crontab that runs `bin/upgrade-agent.sh`
+(`make install` does it too; `make uninstall-upgrade-agent` removes it). After
+that an agent upgrades with:
+
+```bash
+bin/self-upgrade.sh request v2.5.0     # latest | vX.Y | vX.Y.Z; default latest
+bin/self-upgrade.sh status             # state of the current or last upgrade
+```
+
+`request` writes `.karakos/upgrade/request.json` and `status.json` in the
+bind-mounted `.karakos/` directory. It refuses (exit 3) while a request is
+pending or running, and exits 4 with a warning if the host agent has not run in
+the last 10 minutes (the request stays queued).
+
+Each minute the host agent touches `.karakos/upgrade/host-agent.seen`, takes a
+lock, and, if a request is pending:
+
+1. tags the running image `ghcr.io/mcarmody/karakos:rollback`;
+2. runs `git pull --ff-only origin main` (a dirty tree or non-fast-forward
+   fails the upgrade before anything is touched);
+3. sets `KARAKOS_VERSION` in `config/.env` to the requested version (for
+   `latest` it leaves an existing pin alone and says so in `status.json`);
+4. runs `make pull`, `make down`, `make up`;
+5. polls the container for up to 180 s until it is `healthy`.
+
+On success `status.json` says `done`. On any failure it sets `KARAKOS_VERSION`
+to `rollback`, runs `make up` to bring the previous image back, and writes
+`failed` with the failing step in `detail` (the old value is recorded there;
+set `KARAKOS_VERSION` back to a version when you want to move on). Everything is
+logged to `.karakos/upgrade/host.log`.
+
+**Migrations are never automatic.** If the new image exits 78 (`run: karakos
+migrate`), the host agent rolls back and writes `needs-migrate`. Run
+`karakos migrate` yourself, then request the upgrade again.
+
+On the next container start the entrypoint runs `bin/self-upgrade.sh report`,
+which pokes the requesting agent with the result once.
+
 ## Version history
 
 The full changelog is on the GitHub releases page and in

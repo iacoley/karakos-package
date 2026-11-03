@@ -154,6 +154,11 @@ individual logs are under `logs/` in the workspace.
 release and upgrade on your own schedule; the default is `latest`. See
 **[docs/UPGRADING.md](docs/UPGRADING.md)**.
 
+**Self-upgrade.** Run `make install-upgrade-agent` on the host once; after that
+an agent can upgrade the install with `bin/self-upgrade.sh request vX.Y.Z`
+(host-side, rolls back on failure; see
+[Self-upgrade](docs/UPGRADING.md#self-upgrade)).
+
 ---
 
 ## Talking to it

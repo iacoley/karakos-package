@@ -12,7 +12,7 @@ Operating, repairing or contributing to an install: read
 
 | Path | Owns |
 |---|---|
-| `bin/` | Entry points. `agent-server.py` (queue, subprocesses, HTTP API, cost guard), `relay.py` (Discord), `scheduler.py` (timers), `entrypoint.sh`, `karakos` (host migrate wrapper), `preflight.sh`, `create-agent.sh`, `buildq` |
+| `bin/` | Entry points. `agent-server.py` (queue, subprocesses, HTTP API, cost guard), `relay.py` (Discord), `scheduler.py` (timers), `entrypoint.sh`, `karakos` (host migrate wrapper), `preflight.sh`, `create-agent.sh`, `buildq`, `self-upgrade.sh` (container side of the Docker self-upgrade), `upgrade-agent.sh` (its host-side cron half; `make install-upgrade-agent`) |
 | `lib/` | Importable logic: `registry.py` (agents.yaml), `outbox.py` (Discord delivery), `graph/` (memory), `migrate/` (schema migrator), `stall.py`, `setup_answers.py` |
 | `mcp/` | MCP tool servers (`tools-server.py` discovers `skills/`) |
 | `skills/` | Agent tools: `skills/<name>/tools.json` + `scripts/` (not Claude Code's `SKILL.md` feature) |

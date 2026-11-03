@@ -218,16 +218,18 @@ run_check() {
         return 0
     fi
 
+    # The host agent (`make install-upgrade-agent`) is what makes this work.
+    local SELF_UPGRADE_HINT=" To upgrade from here, run \`bin/self-upgrade.sh request ${latest_tag}\` once the host upgrade agent is installed (\`make install-upgrade-agent\` on the host)."
     local message
     if $pinned; then
         log "update available: $latest_tag (this install is pinned to $current)"
-        message="📦 Karakos **${latest_tag}** is out — this install is pinned to \`${current}\`. To upgrade: set \`KARAKOS_VERSION=${latest_tag}\` in \`config/.env\`, then \`docker compose pull && docker compose up -d\`. Release notes: ${release_url}"
+        message="📦 Karakos **${latest_tag}** is out — this install is pinned to \`${current}\`. To upgrade: set \`KARAKOS_VERSION=${latest_tag}\` in \`config/.env\`, then \`docker compose pull && docker compose up -d\`. Release notes: ${release_url}${SELF_UPGRADE_HINT}"
     elif [[ "$current" == "latest" ]]; then
         log "release available: $latest_tag (this install tracks \`latest\`, so the tag alone cannot say whether the image on disk predates it)"
-        message="📦 Karakos **${latest_tag}** is out. This install is not pinned — it tracks \`latest\` — so it is not stuck on an older release, but the image on disk only moves when it is pulled: \`docker compose pull && docker compose up -d\`. Release notes: ${release_url}"
+        message="📦 Karakos **${latest_tag}** is out. This install is not pinned — it tracks \`latest\` — so it is not stuck on an older release, but the image on disk only moves when it is pulled: \`docker compose pull && docker compose up -d\`. Release notes: ${release_url}${SELF_UPGRADE_HINT}"
     else
         log "release available: $latest_tag (running tag \`$current\` is not a release version, so it cannot be compared)"
-        message="📦 Karakos **${latest_tag}** is out. This install runs the image tag \`${current}\`, which is not a release version, so I cannot tell whether it is behind. To move to the release: set \`KARAKOS_VERSION=${latest_tag}\` in \`config/.env\`, then \`docker compose pull && docker compose up -d\`. Release notes: ${release_url}"
+        message="📦 Karakos **${latest_tag}** is out. This install runs the image tag \`${current}\`, which is not a release version, so I cannot tell whether it is behind. To move to the release: set \`KARAKOS_VERSION=${latest_tag}\` in \`config/.env\`, then \`docker compose pull && docker compose up -d\`. Release notes: ${release_url}${SELF_UPGRADE_HINT}"
     fi
 
     # Record only after the notice actually went out, so a failed send is

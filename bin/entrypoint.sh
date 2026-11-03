@@ -57,4 +57,8 @@ fi
 PKG_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 bash "$PKG_ROOT/bin/native-bootstrap.sh" --inherit-env
 
+# Tell the agent that asked for a host-side upgrade how it went (bin/self-upgrade.sh).
+# In the background and never fatal: startup must not wait on it.
+"$WORKSPACE_ROOT/bin/self-upgrade.sh" report || true &
+
 exec supervisord -c "$WORKSPACE_ROOT/config/supervisord.conf"
