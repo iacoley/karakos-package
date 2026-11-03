@@ -60,9 +60,15 @@ time out under full-suite load and pass alone ([EXTENDING.md](docs/EXTENDING.md#
 | `develop` | Integration. Every feature and fix lands here first. | PRs from forks or topic branches |
 | `main` | Releases only. `install.sh` and `install.ps1` clone it. | A release PR from `develop`, approved by the maintainer |
 
-Both branches are protected by rulesets: a PR is required; the checks
-`lint-and-syntax`, `unit-tests` and `docker-smoke` must pass; force-push and
-deletion are blocked. Nobody commits directly to either. GitHub's default branch
+Both branches are protected by rulesets: a PR is required, and force-push and
+deletion are blocked. `main` requires `lint-and-syntax`, `unit-tests` and
+`docker-smoke`. `develop` requires those plus `dashboard`, `preflight`,
+`public-safety`, `compose-check` and `coupling`.
+
+Same-repo PRs into `develop` merge themselves: `.github/workflows/auto-merge.yml`
+turns on squash auto-merge when the PR opens, and GitHub merges once every
+required check passes. Mark a PR draft to hold it. Fork PRs and release PRs into
+`main` are never auto-merged; the maintainer merges those. Nobody commits directly to either. GitHub's default branch
 may still show `main`, so name the base explicitly.
 
 ## Making a change

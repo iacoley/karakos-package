@@ -45,6 +45,7 @@ full-suite load and pass alone.
 
 - **`develop`** is the integration branch. Every PR targets it (`gh pr create --base develop`). GitHub's default branch may still read `main`, so never rely on the default.
 - **`main`** is releases only. It changes through a release PR from `develop` that the maintainer approves. Installers clone `main`.
+- Same-repo PRs into `develop` auto-merge (squash) once the required checks pass (`.github/workflows/auto-merge.yml`). Open a PR as draft to hold it.
 - Both have rulesets: PR required; checks `lint-and-syntax`, `unit-tests`, `docker-smoke` required; no force-push, no deletion.
 - Branch off `develop`, one logical change per PR, fill in `.github/pull_request_template.md`. Never push to `main` or `develop`.
 - Process and release steps: [CONTRIBUTING.md](CONTRIBUTING.md).
