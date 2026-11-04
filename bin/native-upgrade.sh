@@ -12,8 +12,11 @@ die() { echo "native-upgrade: $*" >&2; exit 1; }
 [ -d .git ] || die "$WORKSPACE_ROOT is not a git checkout"
 # hooks-sync rewrites this tracked file on every bootstrap; it is regenerated below.
 git checkout -- config/claude-settings.json 2>/dev/null || true
-[ -z "$(git status --porcelain --untracked-files=no)" ] \
-    || die "tracked files have local changes; commit or stash them first: $(git status --porcelain --untracked-files=no | head -5 | tr '\n' ' ')"
+# .karakos/config.json is tracked with placeholders and rewritten by setup with this
+# install's name and owner, so it is always "modified"; it is not a reason to refuse.
+DIRTY_SPEC=(-- . ':!.karakos/config.json')
+[ -z "$(git status --porcelain --untracked-files=no "${DIRTY_SPEC[@]}")" ] \
+    || die "tracked files have local changes; commit or stash them first: $(git status --porcelain --untracked-files=no "${DIRTY_SPEC[@]}" | head -5 | tr '\n' ' ')"
 
 git fetch -q --tags origin
 if [ -n "${KARAKOS_REF:-}" ]; then
