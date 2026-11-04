@@ -23,7 +23,7 @@ def test_builtin_names_match_old_scheduler():
     names = {j.name for j in jr.load_jobs("/nonexistent")}
     for n in ("heartbeat-primary", "heartbeat-monitor", "memory-consolidate", "health-sweep",
               "wedge-check", "cli-watchdog", "flush-deferred", "purge", "update-check",
-              "scheduler", "mcp-tools", "relay", "monitor-tick"):
+              "scheduler", "mcp-tools", "relay", "monitor-tick", "ask-poll"):
         assert n in names
     comps = {j.name for j in jr.BUILTIN if j.kind == "component"}
     assert comps == {"scheduler", "mcp-tools", "relay"}

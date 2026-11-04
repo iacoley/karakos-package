@@ -74,6 +74,7 @@ BUILTIN = [
         "monitor_jobs.friction_sensor:run_scheduled", 3 * H),
     Job("friction-review", "job", Daily("03:30"),
         "monitor_jobs.friction_review:run_scheduled", 48 * H),
+    Job("ask-poll", "job", Every(60), ["python3", "bin/ask.py", "poll"], 300),
     Job("scheduler", "component", None, None, 300, critical=True),
     Job("mcp-tools", "component", None, None, 600, critical=True),
     Job("relay", "component", None, None, 300, critical=True),

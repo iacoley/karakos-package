@@ -259,6 +259,7 @@ A Raspberry Pi 4 or 5, a mini PC, or a small VM all work.
 | [DISCORD_SETUP.md](docs/DISCORD_SETUP.md) | Creating and inviting the bot |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | You want to know how it actually works |
 | [EXTENDING.md](docs/EXTENDING.md) | Adding skills, tools or agents |
+| [ASKS.md](docs/ASKS.md) | Non-blocking asks with a recommendation, answered by buttons or reactions |
 | [UPGRADING.md](docs/UPGRADING.md) | Moving to a new release, or from 1.x to 2.0 |
 | [OVERLAY.md](docs/OVERLAY.md) | Keeping your config, personas and skills in a private overlay repo instead of a fork |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Sending a patch |

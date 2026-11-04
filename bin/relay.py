@@ -1727,6 +1727,8 @@ class DiscordAdapter(discord.Client):
             return
 
         data = interaction.data or {}
+        if await self._route_ask2(interaction, data.get("custom_id")):
+            return
         parsed = ask_handler.parse_custom_id(data.get("custom_id"))
         if parsed is None:
             return
@@ -1751,6 +1753,34 @@ class DiscordAdapter(discord.Client):
         note = body.get("note") or ask_handler.resolution_note(outcome, None)
         log.info(f"ask {ask_id} click by {getattr(user, 'id', '?')} -> {outcome}")
         await self.ack_interaction(interaction, note, resolved=(outcome == "answered"))
+
+    async def _route_ask2(self, interaction: discord.Interaction, custom_id) -> bool:
+        """Non-blocking ask buttons (`kask2:<id>:<index>`, bin/ask.py).
+
+        True when the id is ours, handled or not. `bin/ask.py answer` checks the
+        owner, records the first answer, wakes the agent and edits the message;
+        a press from anyone else gets no reply.
+        """
+        parts = str(custom_id or "").split(":")
+        if len(parts) != 3 or parts[0] != "kask2" or not parts[2].isdigit():
+            return False
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable, str(WORKSPACE_ROOT / "bin" / "ask.py"), "answer",
+                parts[1], parts[2], str(getattr(interaction.user, "id", "")),
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+            out, _ = await asyncio.wait_for(proc.communicate(), timeout=60)
+            outcome = out.decode().strip()
+        except Exception as e:
+            log.error(f"ask2 answer failed for {parts[1]}: {e}")
+            return True
+        log.info(f"ask2 {parts[1]} press by {getattr(interaction.user, 'id', '?')} -> {outcome}")
+        if outcome in ("answered", "already", "closed"):
+            try:
+                await interaction.response.defer()
+            except Exception as e:
+                log.warning(f"ask2 defer failed: {e}")
+        return True
 
     async def ack_interaction(self, interaction: discord.Interaction, note: str,
                               resolved: bool):
