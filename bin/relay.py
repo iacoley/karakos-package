@@ -1759,7 +1759,8 @@ class DiscordAdapter(discord.Client):
 
         True when the id is ours, handled or not. `bin/ask.py answer` checks the
         owner, records the first answer, wakes the agent and edits the message;
-        a press from anyone else gets no reply.
+        a press from anyone else gets an ephemeral note, so Discord does not show
+        "application didn't respond".
         """
         parts = str(custom_id or "").split(":")
         if len(parts) != 3 or parts[0] != "kask2" or not parts[2].isdigit():
@@ -1773,6 +1774,7 @@ class DiscordAdapter(discord.Client):
             outcome = out.decode().strip()
         except Exception as e:
             log.error(f"ask2 answer failed for {parts[1]}: {e}")
+            await self._ask2_note(interaction, "Could not record that answer. Try again.")
             return True
         log.info(f"ask2 {parts[1]} press by {getattr(interaction.user, 'id', '?')} -> {outcome}")
         if outcome in ("answered", "already", "closed"):
@@ -1780,7 +1782,16 @@ class DiscordAdapter(discord.Client):
                 await interaction.response.defer()
             except Exception as e:
                 log.warning(f"ask2 defer failed: {e}")
+        else:
+            await self._ask2_note(interaction, "Only an owner of this install can answer this question.")
         return True
+
+    async def _ask2_note(self, interaction: discord.Interaction, note: str):
+        """Ephemeral reply to the clicker; the question stays open for its owner."""
+        try:
+            await interaction.response.send_message(note, ephemeral=True)
+        except Exception as e:
+            log.warning(f"ask2 note failed: {e}")
 
     async def ack_interaction(self, interaction: discord.Interaction, note: str,
                               resolved: bool):
