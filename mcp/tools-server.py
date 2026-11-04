@@ -471,6 +471,34 @@ CORE_TOOLS = [
         }
     },
     {
+        "name": "ask",
+        "description": (
+            "Post a question with 2-9 options and a recommendation to a Discord channel, "
+            "then end your turn; you are woken when an owner answers (button or number "
+            "reaction). Use ask_user when the answer is needed inside this turn, ask when "
+            "the turn can end and resume on the answer."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "channel": {"type": "string", "description": "Channel name or id", "path_mode": "none"},
+                "title": {"type": "string", "path_mode": "none"},
+                "problem": {"type": "string", "description": "What needs deciding", "path_mode": "none"},
+                "options": {"type": "array", "description": "2-9 of {label, rationale?}",
+                            "items": {"type": "object"}},
+                "recommendation": {"type": ["integer", "null"],
+                                   "description": "0-based index of the option you recommend, or null"},
+                "no_recommendation": {"type": "string", "description": "Why there is none (when null)",
+                                      "path_mode": "none"},
+                "mention_owner": {"type": "boolean"},
+                "on_answer": {"type": "object",
+                              "description": '{"type":"buzz","shard":S} or {"type":"poke","agent":A}'},
+                "expires_s": {"type": "integer", "description": "Default 14 days"}
+            },
+            "required": ["channel", "title", "problem", "options", "on_answer"]
+        }
+    },
+    {
         "name": "buzz",
         "description": (
             "Leave a message for another shard (an agent id or a shard id) and "
@@ -807,6 +835,28 @@ def _hive_refusal(status: int, body: dict) -> dict:
     return out
 
 
+def ask(args: dict) -> dict:
+    """Non-blocking ask: write the spec to a temp file and hand it to bin/ask.py."""
+    import tempfile
+    spec = {k: v for k, v in args.items() if k in (
+        "channel", "title", "problem", "options", "recommendation", "no_recommendation",
+        "mention_owner", "on_answer", "expires_s")}
+    spec.setdefault("recommendation", None)
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+        json.dump(spec, f)
+    try:
+        r = subprocess.run([sys.executable, str(Path(__file__).resolve().parent.parent / "bin" / "ask.py"),
+                            "post", "--spec", f.name], capture_output=True, text=True, timeout=120)
+    finally:
+        try:
+            os.unlink(f.name)
+        except OSError:
+            pass
+    if r.returncode != 0:
+        return {"status": "error", "error": (r.stderr or r.stdout).strip() or "ask failed"}
+    return {"status": "posted", "ask_id": r.stdout.strip()}
+
+
 def buzz(args: dict) -> dict:
     """Leave a message for another shard. Never blocks, never raises."""
     me = _hive_identity()
@@ -913,6 +963,9 @@ def handle_core_tool(tool_name: str, args: dict) -> dict:
 
     if tool_name == "ask_user":
         return ask_user(args)
+
+    if tool_name == "ask":
+        return ask(args)
 
     if tool_name == "buzz":
         return buzz(args)

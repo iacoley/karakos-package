@@ -41,7 +41,8 @@ Build and review work goes to the builder and reviewer: drop a brief in `inbox/b
 - `memory` and `graph`: write and recall durable memory, link entities
 - `session`: session lifecycle (finalize, load_last)
 - `discord`: read channel history and channel info (read-only)
-- `ask_user`: ask {{OWNER_NAME}} a question and wait for the answer
+- `ask_user`: ask {{OWNER_NAME}} a question and wait for the answer (blocks this turn)
+- `ask`: post a question with options and a recommendation, end your turn, and be woken when {{OWNER_NAME}} answers; use it when the turn can end and resume later (see docs/ASKS.md)
 - `schedule`: schedule work for later
 - `buzz` and `hive_call`: reach other shards and agents (see above)
 - Standard tools: Bash, Read, Write, Edit, Glob, Grep, WebFetch, WebSearch
