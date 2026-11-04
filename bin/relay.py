@@ -2167,7 +2167,12 @@ class DiscordAdapter(discord.Client):
             message.channel.id, message.id, channel_context.context_limit(chan_cfg),
             own_ids=_own_bot_ids(agent, getattr(self, "user", None)))
         if ctx_block:
-            content = f"{ctx_block}\n{content}" if content else ctx_block
+            # Label the triggering text too: after the context lines it would
+            # otherwise read as an anonymous continuation of the last one.
+            created = getattr(message, "created_at", None)
+            content = (f"{ctx_block}\n" + channel_context.trigger_line(
+                message.author.display_name, message.author.id, content,
+                created.timestamp() if created else None))
 
         payload = {
             "agent": agent,

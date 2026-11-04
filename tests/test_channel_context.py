@@ -134,7 +134,8 @@ def _deliver(relay, context, channel_cfg, trigger_text="@marvin take this"):
 def test_relay_prepends_the_context_block(relay):
     c = ring(("Ian", "the draft is wrong"), ("Mike", "agreed"), ("Amos", "ok"))
     out = _deliver(relay, c, {})
-    assert out.endswith("\n@marvin take this")
+    last = out.split("\n")[-1]
+    assert last.startswith("[now] Ian (id 1) (") and last.endswith("): @marvin take this")
     assert out.count("[context]") == 3 and out.index("draft is wrong") < out.index("agreed")
 
 
@@ -204,3 +205,20 @@ def test_relay_shows_untagged_sibling_posts_but_not_strangers(relay):
     post(55, "Stranger", "buy crypto", 2)
     out = me.channel_context.block(7, 3, own_ids={99})
     assert "untagged answer" in out and "buy crypto" not in out
+
+
+def test_trigger_line_names_its_author_like_the_context_lines():
+    line = cc.trigger_line("Arcane", "169260920550195200", "fix your prompt\nordering", ts=1_700_000_000)
+    assert line.startswith("[now] Arcane (id 169260920550195200) (22:13): ")
+    assert line.endswith("fix your prompt\nordering")      # line breaks survive
+
+
+def test_trigger_line_without_a_real_id_is_the_bare_name():
+    assert cc.trigger_line("scheduler", "0", "tick", ts=1_700_000_000).startswith("[now] scheduler (")
+
+
+def test_relay_labels_the_triggering_text_only_when_context_is_added():
+    src = RELAY_PATH.read_text()
+    assert "channel_context.trigger_line(" in src
+    block = src.split("if ctx_block:")[1].split("payload = {")[0]
+    assert "trigger_line" in block

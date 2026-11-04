@@ -38,6 +38,17 @@ def context_limit(channel_config) -> int:
     return raw
 
 
+def trigger_line(author, author_id, text, ts=None) -> str:
+    """The message that woke the agent, labelled like the context lines above it.
+
+    Without this the text that follows a context block has no visible author, and
+    an agent has to guess it from the turn header (which names whoever the queue
+    row belongs to). `text` keeps its line breaks."""
+    hhmm = datetime.fromtimestamp(ts if ts is not None else time.time(),
+                                  timezone.utc).strftime("%H:%M")
+    return f"[now] {identity.label(author, author_id)} ({hhmm}): {text}"
+
+
 def _one_line(text) -> str:
     return re.sub(r"\s+", " ", str(text or "")).strip()
 

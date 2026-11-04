@@ -14,6 +14,10 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- The message that woke an agent now carries its own author when channel context is added (#276 follow-up). The context lines were labelled but the triggering text after them was not, so an agent had to infer its sender from the turn header, which could name someone else. It now ends the delivery as `[now] Author (id 123…) (HH:MM): text`. Tier 1: `bin/relay.py`, three lines in `send_to_agent_server`; `lib/channel_context.py` gains `trigger_line`.
+
 ### Added
 
 - Non-blocking asks (BREE-B). New `ask` MCP tool and `bin/ask.py`: post a question with 2 to 9 options and a recommendation, end the turn, and be woken when an owner answers by button (`kask2:` ids) or number reaction. State in `data/asks/`, first owner answer wins, wake retried if it fails. New `ask-poll` job in `lib/job_registry.py` (reactions, expiry, retry). Tier 1: `bin/relay.py` only in `_route_ask2` and one call in `on_component_interaction`; `bin/scheduler.py` untouched. See `docs/ASKS.md`.

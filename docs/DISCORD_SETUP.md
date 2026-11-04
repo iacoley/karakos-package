@@ -193,7 +193,7 @@ has nothing to point at. With this key the relay prepends the messages that
 arrived in the channel since the agent last posted there (other agents' posts
 included, the triggering message excluded), oldest first, one line each:
 `[context] Author (id 123…) (HH:MM): text` (the Discord user id follows the name; the id is the identity, the name a label that can change, and the agent-server `people` table learns each name per id and server), times in UTC. The default is 8, the range 0 to
-20, and `0` delivers the bare message as before. Each message is cut to 300
+20, and `0` delivers the bare message as before. When context lines are added, the triggering message follows them as `[now] Author (id 123…) (HH:MM): text`, so it always has a visible author. Each message is cut to 300
 characters and the relay remembers the last 20 per channel, in memory only; when
 older messages were left out, the block ends its first line with a note telling
 the agent to call `discord` history for more.
