@@ -155,8 +155,17 @@ def test_other_templates_get_no_onboarding(workspace, template):
 
 
 def test_scaffolds_empty_voice_files(workspace):
-    result = _run(workspace, "alpha")
+    result = _run(workspace, "alpha", "--template", "primary")
     assert result.returncode == 0, result.stderr
     d = workspace / "agents" / "alpha"
     for name in ("voice_reminder.md", "voice_exemplars.md", "persona/voice.md"):
         assert (d / name).exists() and (d / name).read_text() == ""
+
+
+def test_worker_templates_get_no_voice_files(workspace):
+    (workspace / "agents" / "templates" / "builder.md").write_text("# {{AGENT_NAME}}\n")
+    result = _run(workspace, "wrk", "--template", "builder")
+    assert result.returncode == 0, result.stderr
+    d = workspace / "agents" / "wrk"
+    assert not (d / "voice_reminder.md").exists()
+    assert not (d / "voice_exemplars.md").exists()

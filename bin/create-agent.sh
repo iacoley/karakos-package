@@ -148,8 +148,11 @@ touch "$AGENT_DIR/persona/voice.md"
 # Empty per-turn voice files. system/hooks/inject-recall.py appends
 # voice_reminder.md (and a few random voice_exemplars.md entries, split on
 # "---" lines) to every human turn once they have content; empty means off.
-[ -e "$AGENT_DIR/voice_reminder.md" ] || touch "$AGENT_DIR/voice_reminder.md"
-[ -e "$AGENT_DIR/voice_exemplars.md" ] || touch "$AGENT_DIR/voice_exemplars.md"
+# Primary only: it is the agent whose text people read. Workers stay plain.
+if [[ "$TEMPLATE" == "primary" ]]; then
+    [ -e "$AGENT_DIR/voice_reminder.md" ] || touch "$AGENT_DIR/voice_reminder.md"
+    [ -e "$AGENT_DIR/voice_exemplars.md" ] || touch "$AGENT_DIR/voice_exemplars.md"
+fi
 
 # First-boot onboarding is for the primary only; builders, reviewers, the
 # monitor and custom agents get none.
