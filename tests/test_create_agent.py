@@ -152,3 +152,11 @@ def test_other_templates_get_no_onboarding(workspace, template):
     assert result.returncode == 0, result.stderr
     assert not (workspace / "agents" / "other" / "onboarding.md").exists()
     assert "{{AGENT_NAME}}" in (workspace / "agents" / "other" / "SYSTEM_PROMPT.md").read_text()
+
+
+def test_scaffolds_empty_voice_files(workspace):
+    result = _run(workspace, "alpha")
+    assert result.returncode == 0, result.stderr
+    d = workspace / "agents" / "alpha"
+    for name in ("voice_reminder.md", "voice_exemplars.md", "persona/voice.md"):
+        assert (d / name).exists() and (d / name).read_text() == ""

@@ -37,7 +37,7 @@ agents/{name}/
 └── journal/            # Agent-written logs
 ```
 
-Edit `persona/voice.md` to customize how the agent communicates. This file is loaded fresh on each session start — no restart needed.
+Edit `persona/voice.md` to customize how the agent communicates. It outranks `agents/HOUSE_STYLE.md` on register. For a voice that survives a long session, also fill `voice_reminder.md` and `voice_exemplars.md` next to it: the recall hook appends them to every human turn (see "Recall re-injection"). This file is loaded fresh on each session start — no restart needed.
 
 ### Example voice.md
 

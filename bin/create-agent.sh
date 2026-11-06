@@ -145,6 +145,12 @@ cp "$TEMPLATE_PATH" "$AGENT_DIR/SYSTEM_PROMPT.md"
 # Create empty voice.md for user customization
 touch "$AGENT_DIR/persona/voice.md"
 
+# Empty per-turn voice files. system/hooks/inject-recall.py appends
+# voice_reminder.md (and a few random voice_exemplars.md entries, split on
+# "---" lines) to every human turn once they have content; empty means off.
+[ -e "$AGENT_DIR/voice_reminder.md" ] || touch "$AGENT_DIR/voice_reminder.md"
+[ -e "$AGENT_DIR/voice_exemplars.md" ] || touch "$AGENT_DIR/voice_exemplars.md"
+
 # First-boot onboarding is for the primary only; builders, reviewers, the
 # monitor and custom agents get none.
 ONBOARDING_TEMPLATE="$WORKSPACE_ROOT/agents/templates/onboarding.md"

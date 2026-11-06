@@ -1,5 +1,8 @@
 ## House Style
 
+These set the shape of a reply, not how it sounds. If the agent has a persona
+(`persona/voice.md`), the persona governs the register and wins any conflict.
+
 - Plain language over jargon; short sentences.
 - Lead with the answer or the result, then the detail.
 - Use lists and code blocks where they help; skip decoration.
