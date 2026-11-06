@@ -541,6 +541,15 @@ recognizes that same literal string as its skip gate. A batch with even
 one human message alongside automated ones is left unmarked, so a human
 reply riding along in the same batch still gets a fresh recall block.
 
+**Voice reminder.** If `agents/<id>/voice_reminder.md` exists (`<id>` is the
+running agent, from `KARAKOS_AGENT`), the hook appends its text under
+`[VOICE]` to every human turn, after the recall block and independent of it.
+`agents/<id>/voice_exemplars.md`, if present, is split on lines holding only
+`---`, and `KARAKOS_VOICE_EXEMPLARS` (default 2, `0` disables) entries are
+picked at random each turn. Persona text in the system prompt fades over a
+long session; a reminder beside the turn does not. Absent files mean no
+reminder, and automated traffic skips it like recall.
+
 ### Tool permissions (`permissions.allow` / `permissions.deny`)
 
 `bin/agent-server.py` passes `--dangerously-skip-permissions` on every
