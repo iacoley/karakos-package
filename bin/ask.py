@@ -53,10 +53,34 @@ class AskError(Exception):
 
 # ---- identity and config ---------------------------------------------------------
 
+def _env(name):
+    """The process env first, then `config/.env`. An agent's tool process only gets
+    the variables its allowlist names, so the install's own settings (the owner id)
+    would otherwise be invisible to `post`."""
+    if os.environ.get(name):
+        return os.environ[name]
+    try:
+        for line in (ROOT / "config" / ".env").read_text().splitlines():
+            key, sep, val = line.partition("=")
+            if sep and key.strip() == name:
+                return val.strip().strip("'\"")
+    except OSError:
+        pass
+    return ""
+
+
 def owner_ids():
-    ids = {os.environ.get("OWNER_DISCORD_ID", "")}
-    ids.update(x.strip() for x in os.environ.get("ASK_EXTRA_OWNER_IDS", "").split(","))
+    ids = {_env("OWNER_DISCORD_ID")}
+    ids.update(x.strip() for x in _env("ASK_EXTRA_OWNER_IDS").split(","))
     return {i for i in ids if i.isdigit() and int(i) > 0}
+
+
+def default_route():
+    """Wake the asking agent through poke: its turn replies in the channel the ask
+    was posted in. (`buzz` lands in the internal hive channel.) None when the caller
+    is not an agent."""
+    agent = os.environ.get("KARAKOS_AGENT") or os.environ.get("KARAKOS_SHARD") or ""
+    return {"type": "poke", "agent": agent} if agent else None
 
 
 def bot_token():
@@ -256,6 +280,8 @@ def wake(ask):
 
 def cmd_post(spec_file):
     spec = json.loads(Path(spec_file).read_text())
+    if not spec.get("on_answer") and default_route():
+        spec["on_answer"] = default_route()
     validate(spec)
     cid = channel_id(spec["channel"])
     ask_id = "ask-" + uuid.uuid4().hex[:10]

@@ -17,6 +17,7 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 
 - A button press on a non-blocking ask from someone who is not an owner now gets an ephemeral "only an owner can answer" note, and a failed answer lookup gets a retry note. Before, the relay never acknowledged the interaction and Discord showed "application didn't respond". Tier 1: `bin/relay.py`, `_route_ask2` plus a small `_ask2_note` helper.
+- Non-blocking asks: `on_answer` is now optional and defaults to `poke` for the asking agent, so the answer turn replies in the channel of the ask (a `buzz` wake lands in the internal hive channel with no channel reply). `OWNER_DISCORD_ID` and `ASK_EXTRA_OWNER_IDS` are read from `config/.env` when the process env lacks them, which fixes `mention_owner` pinging nobody for agents whose tool env does not carry the owner id. `bin/ask.py` and `mcp/tools-server.py` (tier 2).
 - The message that woke an agent now carries its own author when channel context is added (#276 follow-up). The context lines were labelled but the triggering text after them was not, so an agent had to infer its sender from the turn header, which could name someone else. It now ends the delivery as `[now] Author (id 123…) (HH:MM): text`. Tier 1: `bin/relay.py`, three lines in `send_to_agent_server`; `lib/channel_context.py` gains `trigger_line`.
 
 ### Added

@@ -148,3 +148,45 @@ def test_ask_poll_job_registered():
     sys.path.insert(0, str(ROOT / "lib"))
     import job_registry
     assert "ask-poll" in {j.name for j in job_registry.BUILTIN}
+
+
+def _stored(ask, ask_id):
+    return json.loads((ask.ASK_DIR / f"{ask_id}.json").read_text())
+
+
+def test_missing_on_answer_defaults_to_poking_the_asking_agent(ask, tmp_path, monkeypatch):
+    monkeypatch.setenv("KARAKOS_AGENT", "helper")
+    f = tmp_path / "spec.json"
+    s = spec()
+    del s["on_answer"]
+    f.write_text(json.dumps(s))
+    ask_id = ask.cmd_post(str(f))
+    assert _stored(ask, ask_id)["on_answer"] == {"type": "poke", "agent": "helper"}
+
+
+def test_explicit_on_answer_is_kept(ask, tmp_path, monkeypatch):
+    monkeypatch.setenv("KARAKOS_AGENT", "helper")
+    ask_id = post(ask, tmp_path, on_answer={"type": "buzz", "shard": "main"})
+    assert _stored(ask, ask_id)["on_answer"] == {"type": "buzz", "shard": "main"}
+
+
+def test_missing_on_answer_without_an_agent_is_still_an_error(ask, tmp_path, monkeypatch):
+    for k in ("KARAKOS_AGENT", "KARAKOS_SHARD"):
+        monkeypatch.delenv(k, raising=False)
+    s = spec()
+    del s["on_answer"]
+    f = tmp_path / "spec.json"
+    f.write_text(json.dumps(s))
+    with pytest.raises(ask.AskError, match="on_answer"):
+        ask.cmd_post(str(f))
+
+
+def test_owner_id_falls_back_to_config_env(ask, tmp_path, monkeypatch):
+    monkeypatch.delenv("OWNER_DISCORD_ID", raising=False)
+    (tmp_path / "config" / ".env").write_text("OTHER=1\nOWNER_DISCORD_ID=\"2002\"\nASK_EXTRA_OWNER_IDS=3003, 4004\n")
+    assert ask.owner_ids() == {"2002", "3003", "4004"}
+
+
+def test_process_env_wins_over_config_env(ask, tmp_path):
+    (tmp_path / "config" / ".env").write_text("OWNER_DISCORD_ID=2002\n")
+    assert ask.owner_ids() == {"1001"}

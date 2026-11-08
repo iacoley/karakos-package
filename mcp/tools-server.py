@@ -492,10 +492,10 @@ CORE_TOOLS = [
                                       "path_mode": "none"},
                 "mention_owner": {"type": "boolean"},
                 "on_answer": {"type": "object",
-                              "description": '{"type":"buzz","shard":S} or {"type":"poke","agent":A}'},
+                              "description": 'Optional. Default: poke you, so your answer turn replies in the channel of the ask. Or {"type":"buzz","shard":S} / {"type":"poke","agent":A}'},
                 "expires_s": {"type": "integer", "description": "Default 14 days"}
             },
-            "required": ["channel", "title", "problem", "options", "on_answer"]
+            "required": ["channel", "title", "problem", "options"]
         }
     },
     {

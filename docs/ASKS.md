@@ -17,7 +17,7 @@ Use `ask_user` when the answer is needed inside this turn. Use `ask` when the tu
 | `recommendation` | 0-based index of the recommended option, or `null` |
 | `no_recommendation` | required reason when `recommendation` is `null` |
 | `mention_owner` | `true` pings the owner in the post |
-| `on_answer` | `{"type":"buzz","shard":"main"}` or `{"type":"poke","agent":"main"}` |
+| `on_answer` | optional; default `{"type":"poke","agent":<you>}`, so the answer turn replies in the ask's channel. Or `{"type":"buzz","shard":"main"}` (wakes you in the internal hive channel, no channel reply) or `{"type":"poke","agent":"main"}` |
 | `expires_s` | seconds until the ask expires (default 14 days) |
 
 ```bash
@@ -32,7 +32,7 @@ python3 bin/ask.py list
 
 ## Answering
 
-Each option is a button (`kask2:<id>:<index>`, distinct from the blocking `kask:` buttons). Number reactions 1 to 9 on the same message also work; the `ask-poll` job checks them every minute. Only the owner can answer: `OWNER_DISCORD_ID`, plus any ids in the optional comma list `ASK_EXTRA_OWNER_IDS`. Other presses and reactions are ignored without a reply. The first answer wins.
+Each option is a button (`kask2:<id>:<index>`, distinct from the blocking `kask:` buttons). Number reactions 1 to 9 on the same message also work; the `ask-poll` job checks them every minute. Only the owner can answer: `OWNER_DISCORD_ID` (read from the environment, then `config/.env`), plus any ids in the optional comma list `ASK_EXTRA_OWNER_IDS`. Other presses and reactions are ignored without a reply. The first answer wins.
 
 The answer is written before the agent is woken. If the wake fails, the ask is marked `wake_failed` and `ask-poll` retries it.
 
