@@ -46,6 +46,14 @@ This hook is the only per-prompt recall path. (bin/agent-server.py separately
 loads top graph facts at spawn under a different header, for automated turns
 that skip this hook.)
 
+Voice reminder (opt-in by file): when agents/$KARAKOS_AGENT/voice_reminder.md
+exists, its text is appended to the injected context on every human turn,
+followed by KARAKOS_VOICE_EXEMPLARS (default 2) entries picked at random from
+agents/$KARAKOS_AGENT/voice_exemplars.md (entries separated by a line holding
+only "---"). A persona file in the system prompt fades over a long session;
+text next to the turn does not. It is independent of recall: an empty recall
+block does not suppress it. Absent files mean no reminder.
+
 Skip gate: automated traffic (system pokes, heartbeats, task-complete
 notifications — anything bin/poke.sh sent, which agent-server.py always
 marks is_bot=1) never pays for recall. The is_bot flag itself lives on the
@@ -61,6 +69,8 @@ from __future__ import annotations
 import json
 import math
 import os
+import random
+import re
 import sys as _sys
 _sys.path.insert(0, os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../lib")))
 from paths import workspace_root  # noqa: E402
@@ -204,6 +214,40 @@ def load_graph_recall(prompt_text: str) -> str:
             signal.signal(signal.SIGALRM, old)
 
 
+def _int_opt(name: str, default: int) -> int:
+    try:
+        return max(0, int(os.environ.get(name, default)))
+    except ValueError:
+        return default
+
+
+def load_voice_reminder() -> str:
+    """The agent's voice reminder plus a few random exemplars. Any failure,
+    a missing agent id or a missing file returns "" (never an error)."""
+    agent = os.environ.get("KARAKOS_AGENT", "").strip()
+    if not agent or "/" in agent or agent.startswith("."):
+        return ""
+    try:
+        base = WORKSPACE_ROOT / "agents" / agent
+        reminder = (base / "voice_reminder.md").read_text().strip()
+        if not reminder:
+            return ""
+        parts = [reminder]
+        count = _int_opt("KARAKOS_VOICE_EXEMPLARS", 2)
+        try:
+            raw = (base / "voice_exemplars.md").read_text()
+        except OSError:
+            raw = ""
+        entries = [e.strip() for e in re.split(r"(?m)^---[ \t]*$", raw) if e.strip()]
+        if entries and count:
+            picked = random.sample(entries, min(count, len(entries)))
+            parts.append("Exemplars of the register (take the rhythm, not the words):\n\n"
+                         + "\n\n".join(picked))
+        return "\n\n".join(parts)
+    except OSError:
+        return ""
+
+
 def main() -> int:
     try:
         hook_input = json.load(sys.stdin) if not sys.stdin.isatty() else {}
@@ -218,13 +262,20 @@ def main() -> int:
         return 0
 
     recall = load_recall(prompt_text) if HAS_OVERRIDE else load_graph_recall(prompt_text)
-    if not recall:
+    voice = load_voice_reminder()
+    blocks = []
+    if recall:
+        blocks.append(f"[ACTIVE RECALL]\n\n{recall}")
+    if voice:
+        # Last, so it sits closest to generation.
+        blocks.append(f"[VOICE]\n\n{voice}")
+    if not blocks:
         return 0
 
     print(json.dumps({
         "hookSpecificOutput": {
             "hookEventName": "UserPromptSubmit",
-            "additionalContext": f"[ACTIVE RECALL]\n\n{recall}",
+            "additionalContext": "\n\n".join(blocks),
         }
     }))
     return 0
