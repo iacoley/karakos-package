@@ -48,7 +48,7 @@ SENTINEL = "[KARAKOS_AUTOMATED]"
 
 
 def run_hook(prompt: str, env_overrides: dict) -> subprocess.CompletedProcess:
-    env = {k: v for k, v in os.environ.items() if not k.startswith("KARAKOS_RECALL")}
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("KARAKOS_RECALL", "KARAKOS_AGENT", "KARAKOS_VOICE"))}
     env.update(env_overrides)
     return subprocess.run(
         ["python3", str(HOOK_SCRIPT)],
