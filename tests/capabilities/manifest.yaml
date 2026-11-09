@@ -1,0 +1,108 @@
+# ITHILIEN capability manifest. One entry per capability; see docs/AGENT_CHECKS.md.
+#
+# id      stable name, shown in reports and accepted by --only
+# layer   programmatic (phase 1, runs now) | agentic (phase 2, reported SKIP)
+# desc    what the capability means, one line
+# since   version the capability was added
+# check   function in lib/agent_checks.py, called as fn(workspace) -> (ok, detail)
+# covers  optional: expected tool names (tests/capabilities/expected_tools.json)
+#         that this entry's check verifies
+
+- id: mcp-tools-present
+  layer: programmatic
+  desc: Both MCP servers list every expected tool.
+  since: unreleased
+  check: mcp_tools_present
+  covers:
+    - workspace
+    - session
+    - schedule
+    - memory
+    - graph
+    - discord
+    - send
+    - taskboard
+    - skill
+    - friction
+    - vault
+    - ask_user
+    - ask
+    - buzz
+    - hive_call
+    - list_agents
+    - get_health
+    - reload_agent
+    - reset_agent
+    - create_agent
+    - get_usage
+    - get_cost
+    - tail_log
+    - set_model
+    - snapshot_persona
+    - restore_persona
+    - diagnose
+    - set_effort
+    - get_queue
+    - pause_agent
+    - resume_agent
+    - get_findings
+
+- id: mcp-tool-schemas
+  layer: programmatic
+  desc: Each expected tool's required arguments match the expected file.
+  since: unreleased
+  check: mcp_tool_schemas
+
+- id: hooks-installed
+  layer: programmatic
+  desc: The hook scripts config/hooks.json enables exist and are executable.
+  since: unreleased
+  check: hooks_installed
+
+- id: scheduler-jobs
+  layer: programmatic
+  desc: Every job in lib/job_registry.py is registered by the scheduler's apply_schedule, ask-poll included.
+  since: unreleased
+  check: scheduler_jobs
+
+- id: outbox-roundtrip
+  layer: programmatic
+  desc: A Discord outbox row goes pending, then sending, then delivered, in a temp database.
+  since: unreleased
+  check: outbox_roundtrip
+
+- id: memory-roundtrip
+  layer: programmatic
+  desc: A fact written through the graph library is recalled from a temp data directory.
+  since: unreleased
+  check: memory_roundtrip
+
+- id: ask-roundtrip
+  layer: programmatic
+  desc: bin/ask.py posts to a stubbed Discord, an owner answers, the stored status is answered and the on_answer route is built.
+  since: unreleased
+  check: ask_roundtrip
+
+- id: embed-parse
+  layer: programmatic
+  desc: A fenced embed block becomes an embed; bad JSON stays as text.
+  since: unreleased
+  check: embed_parse
+
+- id: session-finalize-endpoint
+  layer: programmatic
+  desc: With a live agent server, /agents lists each configured agent and /health is healthy. Otherwise skipped.
+  since: unreleased
+  check: session_finalize_endpoint
+
+- id: health-files-fresh
+  layer: programmatic
+  desc: Each file in data/health/ is newer than its component's stale threshold.
+  since: unreleased
+  check: health_files_fresh
+
+- id: schema-stamp
+  layer: programmatic
+  desc: data/.schema-version matches lib/migrate SCHEMA_VERSION.
+  since: unreleased
+  check: schema_stamp

@@ -1,4 +1,4 @@
-.PHONY: install preflight up down ps logs shell pull upgrade-native install-upgrade-agent uninstall-upgrade-agent help
+.PHONY: install preflight up down ps logs shell pull upgrade-native install-upgrade-agent uninstall-upgrade-agent agent-check help
 
 # The compose file lives in config/, not at the repo root, and its env file
 # sits beside it. Every target goes through these two flags so that `make`
@@ -67,6 +67,10 @@ uninstall-upgrade-agent:
 	else \
 		echo "host upgrade agent not installed; nothing to remove"; \
 	fi
+
+## agent-check: Run the capability manifest's programmatic checks (tests/capabilities); exit 1 on any FAIL.
+agent-check:
+	python3 bin/agent-check.py
 
 ## help: List available targets.
 help:

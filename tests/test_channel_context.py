@@ -208,8 +208,8 @@ def test_relay_shows_untagged_sibling_posts_but_not_strangers(relay):
 
 
 def test_trigger_line_names_its_author_like_the_context_lines():
-    line = cc.trigger_line("Arcane", "169260920550195200", "fix your prompt\nordering", ts=1_700_000_000)
-    assert line.startswith("[now] Arcane (id 169260920550195200) (22:13): ")
+    line = cc.trigger_line("Tester", "100000000000000001", "fix your prompt\nordering", ts=1_700_000_000)
+    assert line.startswith("[now] Tester (id 100000000000000001) (22:13): ")
     assert line.endswith("fix your prompt\nordering")      # line breaks survive
 
 

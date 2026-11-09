@@ -1,0 +1,225 @@
+{
+  "tools": [
+    {
+      "name": "workspace",
+      "server": "tools-server.py",
+      "required": [
+        "action"
+      ]
+    },
+    {
+      "name": "session",
+      "server": "tools-server.py",
+      "required": [
+        "action"
+      ]
+    },
+    {
+      "name": "schedule",
+      "server": "tools-server.py",
+      "required": [
+        "action"
+      ]
+    },
+    {
+      "name": "memory",
+      "server": "tools-server.py",
+      "required": [
+        "action"
+      ]
+    },
+    {
+      "name": "graph",
+      "server": "tools-server.py",
+      "required": [
+        "action"
+      ]
+    },
+    {
+      "name": "discord",
+      "server": "tools-server.py",
+      "required": [
+        "action"
+      ]
+    },
+    {
+      "name": "send",
+      "server": "tools-server.py",
+      "required": [
+        "action"
+      ]
+    },
+    {
+      "name": "taskboard",
+      "server": "tools-server.py",
+      "required": [
+        "action"
+      ]
+    },
+    {
+      "name": "skill",
+      "server": "tools-server.py",
+      "required": [
+        "action"
+      ]
+    },
+    {
+      "name": "friction",
+      "server": "tools-server.py",
+      "required": [
+        "action"
+      ]
+    },
+    {
+      "name": "vault",
+      "server": "tools-server.py",
+      "required": [
+        "action"
+      ]
+    },
+    {
+      "name": "ask_user",
+      "server": "tools-server.py",
+      "required": [
+        "options",
+        "question"
+      ]
+    },
+    {
+      "name": "ask",
+      "server": "tools-server.py",
+      "required": [
+        "channel",
+        "options",
+        "problem",
+        "title"
+      ]
+    },
+    {
+      "name": "buzz",
+      "server": "tools-server.py",
+      "required": [
+        "message",
+        "to"
+      ]
+    },
+    {
+      "name": "hive_call",
+      "server": "tools-server.py",
+      "required": [
+        "question",
+        "to"
+      ]
+    },
+    {
+      "name": "list_agents",
+      "server": "admin-server.py",
+      "required": []
+    },
+    {
+      "name": "get_health",
+      "server": "admin-server.py",
+      "required": []
+    },
+    {
+      "name": "reload_agent",
+      "server": "admin-server.py",
+      "required": [
+        "name"
+      ]
+    },
+    {
+      "name": "reset_agent",
+      "server": "admin-server.py",
+      "required": [
+        "name"
+      ]
+    },
+    {
+      "name": "create_agent",
+      "server": "admin-server.py",
+      "required": [
+        "name"
+      ]
+    },
+    {
+      "name": "get_usage",
+      "server": "admin-server.py",
+      "required": []
+    },
+    {
+      "name": "get_cost",
+      "server": "admin-server.py",
+      "required": []
+    },
+    {
+      "name": "tail_log",
+      "server": "admin-server.py",
+      "required": [
+        "service"
+      ]
+    },
+    {
+      "name": "set_model",
+      "server": "admin-server.py",
+      "required": [
+        "model",
+        "name"
+      ]
+    },
+    {
+      "name": "snapshot_persona",
+      "server": "admin-server.py",
+      "required": [
+        "name"
+      ]
+    },
+    {
+      "name": "restore_persona",
+      "server": "admin-server.py",
+      "required": [
+        "name",
+        "snapshot_id"
+      ]
+    },
+    {
+      "name": "diagnose",
+      "server": "admin-server.py",
+      "required": []
+    },
+    {
+      "name": "set_effort",
+      "server": "admin-server.py",
+      "required": [
+        "level",
+        "name"
+      ]
+    },
+    {
+      "name": "get_queue",
+      "server": "admin-server.py",
+      "required": [
+        "name"
+      ]
+    },
+    {
+      "name": "pause_agent",
+      "server": "admin-server.py",
+      "required": [
+        "name"
+      ]
+    },
+    {
+      "name": "resume_agent",
+      "server": "admin-server.py",
+      "required": [
+        "name"
+      ]
+    },
+    {
+      "name": "get_findings",
+      "server": "admin-server.py",
+      "required": []
+    }
+  ]
+}
