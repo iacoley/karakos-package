@@ -1308,9 +1308,25 @@ async def post_cost_update(agent: str, metadata: Dict):
     # in-memory session map so a cost row is never left unattributed.
     session_id = metadata.get("session_id") or agent_sessions.get(agent)
 
-    # Calculate delta
-    last_cost = agent_last_cost.get(agent, 0.0)
+    # Calculate delta. agent_last_cost lives in process memory, so after a
+    # server restart the first turn of a resumed session would book the whole
+    # session total as one delta. Seed it from the last stored total for the
+    # same session instead.
+    last_cost = agent_last_cost.get(agent)
+    if last_cost is None:
+        last_cost = 0.0
+        if session_id:
+            async with db.execute(
+                "SELECT session_total FROM cost_events WHERE agent = ? AND session_id = ? "
+                "ORDER BY rowid DESC LIMIT 1",
+                (agent, session_id),
+            ) as cursor:
+                row = await cursor.fetchone()
+                if row and row["session_total"] is not None:
+                    last_cost = row["session_total"]
     cost_delta = session_total - last_cost
+    if cost_delta < 0:
+        cost_delta = session_total
     agent_last_cost[agent] = session_total
 
     # Store in database
