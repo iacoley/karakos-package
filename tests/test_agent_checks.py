@@ -61,7 +61,13 @@ def test_manifest_parses_and_ids_are_unique(runner):
 
 
 def test_every_check_names_a_real_function(runner, checks):
+    import agent_cases
     for e in _entries(runner):
+        if e["layer"] == "agentic":
+            fn = agent_cases.SHARED.get(e["id"])
+            assert callable(fn) and fn.__name__ == e["check"], \
+                f"{e['id']}: not registered in lib/agent_cases.py SHARED as {e['check']}"
+            continue
         fn = getattr(checks, e["check"], None)
         assert callable(fn), f"{e['id']}: {e['check']} is not a function in lib/agent_checks.py"
 
@@ -77,7 +83,7 @@ def test_every_expected_tool_has_a_manifest_entry(runner):
 def test_run_one_reports_agentic_as_skip_and_bad_check_as_fail(runner, ws):
     skip = runner.run_one({"id": "later", "layer": "agentic", "check": "none",
                            "desc": "", "since": "x"}, ws)
-    assert skip["status"] == "skip" and skip["detail"] == "skipped: phase 2"
+    assert skip["status"] == "skip" and skip["detail"] == "run with --layer agentic"
     bad = runner.run_one({"id": "typo", "layer": "programmatic", "check": "no_such_check",
                           "desc": "", "since": "x"}, ws)
     assert bad["status"] == "FAIL" and "no_such_check" in bad["detail"]

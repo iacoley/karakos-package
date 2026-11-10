@@ -108,6 +108,17 @@ class Transcript:
         """Contents of every `send` call addressed to `channel`."""
         return [str(a.get("content", "")) for a in self.called("send", channel=channel)]
 
+    def tool_results(self) -> list:
+        """[{'content', 'is_error'}] for each tool_result block, in order."""
+        out = []
+        for e in self.events:
+            if e.get("type") != "user":
+                continue
+            for b in (e.get("message") or {}).get("content") or []:
+                if isinstance(b, dict) and b.get("type") == "tool_result":
+                    out.append({"content": b.get("content"), "is_error": bool(b.get("is_error"))})
+        return out
+
     def shell_commands(self) -> list:
         return [str(a.get("command", "")) for n, a in self.tool_calls() if n == "Bash"]
 
@@ -138,6 +149,8 @@ def run_case(fn: Callable[[], tuple], runs: int = RUNS, pass_at: int = PASS_AT) 
             ok, detail = fn()
         except Exception as e:  # noqa: BLE001 - a case reports, it does not raise
             ok, detail = False, f"{type(e).__name__}: {e}"
+        if ok is None:  # the case cannot run here: report SKIP, not a failure
+            return {"status": "SKIP", "runs": 0, "passes": 0, "flaky": False, "detail": str(detail)}
         made += 1
         passes += 1 if ok else 0
         details.append(str(detail))
@@ -265,8 +278,56 @@ class AgentClient:
         except urllib.error.HTTPError as e:
             return e.code, {}
 
+    def _get(self, path: str, timeout: int = 15) -> tuple:
+        req = urllib.request.Request(self.base + path,
+                                     headers={"Authorization": f"Bearer {self.token}"})
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return r.status, json.loads(r.read() or b"{}")
+        except urllib.error.HTTPError as e:
+            return e.code, {}
+
     def register(self, agent: str) -> tuple:
+        """Start `agent`. 200 = started, 409 = already running (a provisioned scratch
+        agent): both are fine. Anything else means the agent is not in the config."""
         return self._post(f"/agents/{agent}/register")
+
+    def ensure(self, agent: str) -> bool:
+        status, _ = self.register(agent)
+        return status in (200, 409)
+
+    def reset(self, agent: str) -> None:
+        """Cold session reset: the next turn starts with an empty context."""
+        self._post(f"/agents/{agent}/reset")
+
+    def can_list_asks(self) -> bool:
+        status, _ = self._get("/ask?agent=ithilien-probe")
+        return status == 200
+
+    def pending_ask(self, agent: str) -> dict | None:
+        status, body = self._get(f"/ask?agent={agent}")
+        asks = body.get("asks") if status == 200 else None
+        return asks[0] if asks else None
+
+    def answer_ask(self, ask_id: str, index: int) -> None:
+        self._post(f"/ask/{ask_id}/answer", {"index": index, "user_id": "0", "user_name": "ithilien"})
+
+    def stub_memory_fail_once(self, agent: str) -> bool:
+        """True only if the agent's memory tool honours the fail-once flag. Nothing in
+        the package does yet, so the case reports SKIP rather than pretend."""
+        return bool(os.environ.get("ITHILIEN_MEMORY_FAIL_ONCE_WIRED"))
+
+    def guard_enforced(self, agent: str) -> bool:
+        """True only if the scratch agent's shell really goes through the guard script.
+        The scratch agent runs as the install's own user, so a prompt naming a decoy path
+        is not a sandbox. Until the install wires the guard (a hook or per-agent SHELL in
+        config/), the destructive case reports SKIP instead of risking real data."""
+        return bool(os.environ.get("ITHILIEN_GUARD_ENFORCED"))
+
+    def set_reply_token(self, agent: str, token: str) -> None:
+        """Give the sibling its code word with a turn of its own, so no prompt file changes."""
+        self.send(agent, f"Your code word for this run is {token}. When anyone asks for "
+                         f"your code word, reply with exactly that and nothing else.")
 
     def teardown(self, agent: str) -> None:
         for path in (f"/agents/{agent}/kill", f"/agents/{agent}/reset"):

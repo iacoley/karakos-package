@@ -35,7 +35,7 @@ python3 -m pytest tests/test_docs.py -q                # after any docs/ or READ
 bash system/check-coupling.sh                          # must print "coupling: clean"
 ```
 
-The capability manifest (`tests/capabilities/manifest.yaml`) is checked by `make agent-check`; see [docs/AGENT_CHECKS.md](docs/AGENT_CHECKS.md).
+The capability manifest (`tests/capabilities/manifest.yaml`) is checked by `make agent-check`; the model-driven layer runs with `python3 bin/agent-check.py --layer agentic`; see [docs/AGENT_CHECKS.md](docs/AGENT_CHECKS.md).
 
 Markers (`pytest.ini`): `slow` = needs Docker or the real CLI (deselect with `-m "not slow"`);
 `docker` = needs a Docker daemon (skipped when absent unless `KARAKOS_REQUIRE_DOCKER=1`);
