@@ -113,11 +113,18 @@ def run_agentic(a) -> int:
                           meter=agentic.CostMeter(a.max_cost_usd),
                           env_names=agent_cases.allowlist_env_names(workspace))
     ids = [x.strip() for x in a.cases.split(",") if x.strip()] or None
-    unknown = [i for i in ids or [] if i not in agent_cases.SHARED]
+    cases = dict(agent_cases.SHARED)
+    if a.extras:
+        extras_file = ROOT / "tests" / "capabilities" / "extras" / f"{a.extras}.yaml"
+        if not extras_file.is_file():
+            print(f"agent-check: no extras file {extras_file}", file=sys.stderr)
+            return 1
+        cases.update(agent_cases.load_extras(extras_file))
+    unknown = [i for i in ids or [] if i not in cases]
     if unknown:
         print(f"agent-check: no such agentic case: {', '.join(unknown)}", file=sys.stderr)
         return 1
-    report = agent_cases.run_battery(ctx, ids)
+    report = agent_cases.run_battery(ctx, ids, cases)
     doc = {"version": version(), "layer": "agentic",
            "ran_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), **report}
     append_log(doc, workspace)
@@ -138,6 +145,7 @@ def main(argv=None) -> int:
     ap.add_argument("--json", action="store_true", help="print one JSON document")
     ap.add_argument("--only", default="", help="comma-separated capability ids")
     ap.add_argument("--layer", choices=LAYERS, help="run only this layer")
+    ap.add_argument("--extras", default="", help="agentic: also run tests/capabilities/extras/NAME.yaml")
     ap.add_argument("--cases", default="", help="agentic: comma-separated case ids")
     ap.add_argument("--max-cost-usd", type=float, default=agentic.DEFAULT_MAX_COST_USD,
                     help="agentic: stop starting new cases at this spend (default 3.00)")

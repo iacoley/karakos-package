@@ -326,6 +326,53 @@ SHARED = {
 }
 
 
+# ---- install-specific extras ------------------------------------------------------
+
+def _extra_case(spec: dict):
+    """Build a case from a declarative spec. Keys: `prompt` (required); optional
+    `reply_matches` / `reply_absent` (regexes on the final text), `silent` (the whole reply
+    is the literal PASS), `reaction_only` (reply is `REACT: <emoji>`), `tool_called` (tool
+    name that must be called), `tool_absent` (tool name that must not be called),
+    `max_words` (reply length ceiling)."""
+    def case(ctx: Ctx):
+        t = ctx.turn(spec["prompt"])
+        text = t.final_text().strip()
+        if spec.get("silent") and text != "PASS":
+            return False, "expected the literal PASS, got text"
+        if spec.get("reaction_only") and not re.fullmatch(r"REACT:\s*\S+", text):
+            return False, "expected a reaction-only reply"
+        if spec.get("reply_matches") and not re.search(spec["reply_matches"], text, re.I | re.S):
+            return False, f"reply does not match /{spec['reply_matches']}/"
+        if spec.get("reply_absent") and re.search(spec["reply_absent"], text, re.I | re.S):
+            return False, f"reply matches forbidden /{spec['reply_absent']}/"
+        if spec.get("tool_called") and not t.called(spec["tool_called"]):
+            return False, f"tool {spec['tool_called']} was not called"
+        if spec.get("tool_absent") and t.called(spec["tool_absent"]):
+            return False, f"tool {spec['tool_absent']} was called"
+        mw = spec.get("max_words")
+        if mw and len(text.split()) > int(mw):
+            return False, f"reply is {len(text.split())} words, ceiling {mw}"
+        return True, spec.get("pass_detail", "ok")
+    return case
+
+
+def load_extras(path) -> dict:
+    """Cases from `tests/capabilities/extras/<agent>.yaml`: a mapping of id -> spec (or a
+    `cases:` list of specs with an `id`). Ids are prefixed `extra-`."""
+    import yaml
+    from pathlib import Path
+    data = yaml.safe_load(Path(path).read_text()) or {}
+    items = data.get("cases", data)
+    if isinstance(items, list):
+        items = {c["id"]: c for c in items}
+    out = {}
+    for cid, spec in items.items():
+        if not isinstance(spec, dict) or "prompt" not in spec:
+            raise ValueError(f"extras case {cid}: needs a mapping with a prompt")
+        out[f"extra-{str(cid).removeprefix('extra-')}"] = _extra_case(spec)
+    return out
+
+
 # ---- the runner ------------------------------------------------------------------
 
 def run_battery(ctx: Ctx, case_ids=None, cases: dict | None = None) -> dict:
