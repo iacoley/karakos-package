@@ -46,26 +46,44 @@ def _dump(args: dict) -> str:
 
 # ---- 1. memory write and recall --------------------------------------------------
 
-def _forget_written(ctx: Ctx, transcript: "ag.Transcript") -> int:
+def _open_store(workspace):
+    try:
+        from graph import open_graph
+    except ImportError:
+        from graph.store import open_graph
+    return open_graph(str(workspace))
+
+
+def _forget_written(ctx: Ctx, transcript: "ag.Transcript", token: str = "") -> int:
     """Forget the observations a scratch agent wrote this run. The scratch agent shares the
     install's graph, so a test token left behind would answer the next run from memory (and
-    sit in the owner's recall). Returns how many were forgotten; never raises."""
+    sit in the owner's recall). Forgets by id parsed from tool results, then sweeps any live
+    observation carrying the token. Returns how many were forgotten; never raises."""
     if ctx.workspace is None:
         return 0
     forgot = 0
     try:
-        from graph import open_graph
-        store = open_graph(str(ctx.workspace))
+        store = _open_store(ctx.workspace)
+        ids = set()
         for r in transcript.tool_results():
             c = r.get("content")
             text = c if isinstance(c, str) else json.dumps(c)
-            for m in re.finditer(r'(?:"id"\s*:\s*|observation\s+)(\d+)', text):
-                try:
-                    store.forget_observation(int(m.group(1)), reason="ITHILIEN test token",
-                                             agent="agent-check")
-                    forgot += 1
-                except (KeyError, ValueError):
-                    pass
+            ids.update(int(m.group(1)) for m in
+                       re.finditer(r'(?:"id"\s*:\s*|observation\s+)(\d+)', text))
+        if token and hasattr(store, "connect"):
+            try:
+                conn = store.connect()
+                ids.update(row[0] for row in conn.execute(
+                    "SELECT id FROM observations WHERE archived_at IS NULL AND content LIKE ?",
+                    (f"%{token}%",)))
+            except Exception:  # noqa: BLE001 - sweep is best effort
+                pass
+        for oid in sorted(ids):
+            try:
+                store.forget_observation(oid, reason="ITHILIEN test token", agent="agent-check")
+                forgot += 1
+            except (KeyError, ValueError):
+                pass
     except Exception:  # noqa: BLE001 - cleanup must not turn a pass into a crash
         pass
     return forgot
@@ -88,7 +106,7 @@ def memory_write_recall(ctx: Ctx):
                       "wrote in turn 1; turn 2 answered after a reset with no recall call "
                       "(recalled context was injected)")
     finally:
-        _forget_written(ctx, t1)
+        _forget_written(ctx, t1, n)
 
 
 # ---- 2. ask with a recommendation ------------------------------------------------
@@ -231,6 +249,7 @@ def tool_error_recovery(ctx: Ctx):
 
 def sibling_call(ctx: Ctx):
     n = ag.fresh_token()
+    ctx.client.reset(ctx.agent_b)  # one code word in its context, not the earlier attempts'
     ctx.client.set_reply_token(ctx.agent_b, n)
     t = ctx.turn(f"Ask the other agent ({ctx.agent_b}) for its code word and tell me what it says.")
     if not t.called("hive_call", to=ctx.agent_b):
