@@ -10,6 +10,8 @@ appended per run to data/agent-checks/results.jsonl.
     python3 bin/agent-check.py --only ID[,ID]      selected capabilities
     python3 bin/agent-check.py --layer programmatic
     python3 bin/agent-check.py --json              one JSON document on stdout
+    python3 bin/agent-check.py --layer agentic     the agentic battery (needs ITHILIEN_TEST_CHANNEL)
+    python3 bin/agent-check.py --layer agentic --cases ID[,ID] --max-cost-usd 3
 
 Exit 0 when nothing FAILs, 1 otherwise.
 """
@@ -17,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from datetime import datetime, timezone
@@ -28,6 +31,8 @@ for _p in (str(ROOT / "lib"), str(ROOT)):
         sys.path.insert(0, _p)
 
 import agent_checks  # noqa: E402
+import agent_cases  # noqa: E402
+import agent_checks_agentic as agentic  # noqa: E402
 import paths  # noqa: E402
 import yaml  # noqa: E402
 
@@ -53,7 +58,7 @@ def run_one(entry: dict, workspace: Path) -> dict:
     cid, layer = entry["id"], entry["layer"]
     t0 = time.monotonic()
     if layer == "agentic":
-        status, detail = "skip", "skipped: phase 2"
+        status, detail = "skip", "run with --layer agentic"
     elif layer == "programmatic":
         fn = getattr(agent_checks, str(entry["check"]), None)
         if not callable(fn):
@@ -93,11 +98,49 @@ def append_log(doc: dict, workspace: Path) -> None:
         print(f"warning: could not append data/agent-checks/results.jsonl: {e}", file=sys.stderr)
 
 
+def run_agentic(a) -> int:
+    """The agentic layer: scratch agents only, 3 runs per case, pass at 2, cost-capped."""
+    channel = os.environ.get("ITHILIEN_TEST_CHANNEL", "")
+    if not channel:
+        print(f"SKIP {agentic.SKIP_NO_CHANNEL}")
+        return 0
+    workspace = paths.workspace_path(ROOT)
+    token = os.environ.get("AGENT_SERVER_TOKEN", "")
+    base = os.environ.get("AGENT_SERVER_URL") or \
+        f"http://localhost:{os.environ.get('AGENT_SERVER_PORT', '18791')}"
+    client = agentic.AgentClient(base, token, workspace / "logs" / "agent-streams", channel)
+    ctx = agent_cases.Ctx(client=client, channel=channel, workspace=workspace,
+                          meter=agentic.CostMeter(a.max_cost_usd),
+                          env_names=agent_cases.allowlist_env_names(workspace))
+    ids = [x.strip() for x in a.cases.split(",") if x.strip()] or None
+    unknown = [i for i in ids or [] if i not in agent_cases.SHARED]
+    if unknown:
+        print(f"agent-check: no such agentic case: {', '.join(unknown)}", file=sys.stderr)
+        return 1
+    report = agent_cases.run_battery(ctx, ids)
+    doc = {"version": version(), "layer": "agentic",
+           "ran_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), **report}
+    append_log(doc, workspace)
+    if a.json:
+        print(json.dumps(doc))
+    else:
+        for r in report["results"]:
+            flag = " flaky" if r.get("flaky") else ""
+            print(f"{r['status']:<4} {r['id']:<30} {r['passes']}/{r['runs']}{flag}  {r['detail']}")
+        if report["aborted"]:
+            print(f"aborted: {report['aborted']} (spent {report['spent_usd']} USD)")
+    return 1 if any(r["status"] == "FAIL" for r in report["results"]) or \
+        (report["aborted"] and not report["results"]) else 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--json", action="store_true", help="print one JSON document")
     ap.add_argument("--only", default="", help="comma-separated capability ids")
     ap.add_argument("--layer", choices=LAYERS, help="run only this layer")
+    ap.add_argument("--cases", default="", help="agentic: comma-separated case ids")
+    ap.add_argument("--max-cost-usd", type=float, default=agentic.DEFAULT_MAX_COST_USD,
+                    help="agentic: stop starting new cases at this spend (default 3.00)")
     a = ap.parse_args(argv)
 
     try:
@@ -105,6 +148,8 @@ def main(argv=None) -> int:
     except (OSError, ValueError, yaml.YAMLError) as e:
         print(f"agent-check: bad manifest: {e}", file=sys.stderr)
         return 1
+    if a.layer == "agentic":
+        return run_agentic(a)
     only = [x.strip() for x in a.only.split(",") if x.strip()] or None
     chosen = select(entries, only, a.layer)
     workspace = paths.workspace_path(ROOT)
