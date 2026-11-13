@@ -391,3 +391,31 @@ def test_cli_skips_without_a_test_channel(monkeypatch, capsys):
     spec.loader.exec_module(mod)
     assert mod.main(["--layer", "agentic"]) == 0
     assert capsys.readouterr().out.strip() == f"SKIP {ag.SKIP_NO_CHANNEL}"
+
+
+# ---- install-specific extras ---------------------------------------------------------
+
+def test_load_extras_builds_prefixed_cases(tmp_path):
+    f = tmp_path / "x.yaml"
+    f.write_text("cases:\n  - id: quiet\n    prompt: hi\n    silent: true\n")
+    got = cases.load_extras(f)
+    assert list(got) == ["extra-quiet"]
+
+
+def test_load_extras_rejects_a_case_without_a_prompt(tmp_path):
+    f = tmp_path / "x.yaml"
+    f.write_text("cases:\n  - id: bad\n    silent: true\n")
+    with pytest.raises(ValueError):
+        cases.load_extras(f)
+
+
+def test_extra_case_checks_silence_reaction_and_patterns():
+    def run(spec, reply):
+        fc = FakeClient({"ithilien-scratch": [transcript(result(reply))]})
+        return cases._extra_case(spec)(ctx_for(fc))[0]
+    assert run({"prompt": "p", "silent": True}, "PASS") is True
+    assert run({"prompt": "p", "silent": True}, "I will say nothing") is False
+    assert run({"prompt": "p", "reaction_only": True}, "REACT: 👍") is True
+    assert run({"prompt": "p", "reaction_only": True}, "sure") is False
+    assert run({"prompt": "p", "reply_absent": "let me know"}, "Done. Let me know!") is False
+    assert run({"prompt": "p", "max_words": 3}, "one two three four") is False

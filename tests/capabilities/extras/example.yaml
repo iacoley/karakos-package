@@ -1,0 +1,11 @@
+# Install-specific agentic cases. Copy to <agent>.yaml and run:
+#   python3 bin/agent-check.py --layer agentic --extras <agent>
+# Keys: prompt, reply_matches, reply_absent, silent, reaction_only, tool_called,
+#       tool_absent, max_words, pass_detail.
+cases:
+  - id: silence-on-chatter
+    prompt: "Two other people are chatting about lunch. Nothing here is addressed to you."
+    silent: true
+  - id: brief-ack
+    prompt: "Thanks, that is all for now."
+    max_words: 40

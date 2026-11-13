@@ -81,6 +81,7 @@ Entries for MCP tools also carry `covers:`, a list of tool names from
 ```bash
 python3 bin/agent-check.py --layer agentic                          # the shared battery
 python3 bin/agent-check.py --layer agentic --cases agentic-status-embed --max-cost-usd 1
+python3 bin/agent-check.py --layer agentic --extras example   # adds tests/capabilities/extras/example.yaml
 ```
 
 A case sends a prompt to a scratch agent and asserts over the stream-json transcript the
