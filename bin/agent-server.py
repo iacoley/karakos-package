@@ -5118,6 +5118,26 @@ async def handle_ask_create(request):
     return web.json_response(ask.status(), status=201)
 
 
+async def handle_ask_list(request):
+    """GET /ask?agent=NAME - Questions still waiting for a click (read-only).
+
+    Lets a test harness find the pending ask and press a button without the
+    id. `agent` is a shard id or an agent id; omit it for every agent. An agent
+    with nothing pending, or an unknown one, gets an empty list, not an error.
+    """
+    if not _bearer_ok(request):
+        return web.json_response({"error": "Unauthorized"}, status=401)
+
+    for expired in ask_registry.sweep():
+        write_agent_beacon(expired.agent, "PROCESSING", force=True)
+        log.info(f"{expired.agent} question {expired.ask_id} expired unanswered")
+
+    name = request.query.get("agent", "")
+    if name:
+        name = shards_lib.first_shard(effective_specs(), name) or name
+    return web.json_response({"asks": ask_registry.pending(name or None)})
+
+
 async def handle_ask_status(request):
     """GET /ask/{ask_id} - Poll for the answer."""
     if not _bearer_ok(request):
@@ -5401,6 +5421,7 @@ def create_app(with_lifecycle: bool = True) -> web.Application:
     app.router.add_get("/cost/{agent}", handle_cost_get)
     app.router.add_get("/usage", handle_usage)
     app.router.add_post("/ask", handle_ask_create)
+    app.router.add_get("/ask", handle_ask_list)
     app.router.add_get("/ask/{ask_id}", handle_ask_status)
     app.router.add_post("/ask/{ask_id}/answer", handle_ask_answer)
     app.router.add_post("/react", handle_react)

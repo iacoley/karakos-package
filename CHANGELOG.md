@@ -14,6 +14,10 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `GET /ask?agent=NAME` lists the questions still waiting for a click (read-only, bearer-authenticated; an agent with nothing pending gets an empty list). It lets a test harness find a pending blocking ask and press a button. Tier 1: `bin/agent-server.py`, `handle_ask_list`; `AskRegistry.pending` in `bin/ask_handler.py`.
+
 ### Fixed
 
 - A button press on a non-blocking ask from someone who is not an owner now gets an ephemeral "only an owner can answer" note, and a failed answer lookup gets a retry note. Before, the relay never acknowledged the interaction and Discord showed "application didn't respond". Tier 1: `bin/relay.py`, `_route_ask2` plus a small `_ask2_note` helper.
