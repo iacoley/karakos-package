@@ -302,6 +302,18 @@ class AskRegistry:
     def get(self, ask_id: str) -> Optional[PendingAsk]:
         return self._asks.get(ask_id)
 
+    def pending(self, agent: Optional[str] = None,
+                now: Optional[float] = None) -> List[Dict[str, Any]]:
+        """Status of every question still waiting for a click, oldest first,
+        optionally only those belonging to `agent`. Read-only: expiry is left
+        to `sweep`, which the caller runs first."""
+        now = time.time() if now is None else now
+        rows = [a for a in self._asks.values()
+                if not a.answered and not a.expired and now < a.expires_at
+                and (not agent or a.agent == agent)]
+        rows.sort(key=lambda a: a.expires_at)
+        return [a.status(now) for a in rows]
+
     def payload_for(self, ask: PendingAsk) -> Dict[str, Any]:
         return build_ask_payload(
             ask.ask_id, ask.question, ask.options, ask.header, ask.agent

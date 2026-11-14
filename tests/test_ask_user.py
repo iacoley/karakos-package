@@ -418,6 +418,30 @@ def test_ask_routes_require_the_bearer_token(ags):
     run(scenario)
 
 
+def test_listing_pending_asks_is_read_only_and_filtered_by_agent(ags):
+    async def scenario():
+        h = await _harness(ags)
+        assert (await h.client.get("/ask")).status == 401
+        empty = await (await h.client.get("/ask?agent=amos", headers=h.auth())).json()
+        assert empty == {"asks": []}
+        ask_id = (await (await h.create()).json())["ask_id"]
+        got = await (await h.client.get("/ask?agent=amos", headers=h.auth())).json()
+        assert [a["ask_id"] for a in got["asks"]] == [ask_id]
+        assert got["asks"][0]["status"] == "pending"
+        again = await (await h.client.get("/ask?agent=amos", headers=h.auth())).json()
+        assert again == got, "listing must not consume or change the ask"
+        other = await (await h.client.get("/ask?agent=nobody", headers=h.auth())).json()
+        assert other == {"asks": []}
+        everyone = await (await h.client.get("/ask", headers=h.auth())).json()
+        assert len(everyone["asks"]) == 1
+        await h.answer(ask_id, 0)
+        done = await (await h.client.get("/ask?agent=amos", headers=h.auth())).json()
+        assert done == {"asks": []}, "an answered ask is no longer pending"
+        await h.client.close()
+
+    run(scenario)
+
+
 def test_a_malformed_question_is_rejected_with_a_reason(ags):
     async def scenario():
         h = await _harness(ags)
