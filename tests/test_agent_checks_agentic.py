@@ -66,7 +66,7 @@ class FakeClient:
 
     guard = True
 
-    def guard_enforced(self, agent):
+    def guard_enforced(self, agent, sandbox_factory=None):
         return self.guard
 
     def set_reply_token(self, agent, token):
@@ -419,3 +419,46 @@ def test_extra_case_checks_silence_reaction_and_patterns():
     assert run({"prompt": "p", "reaction_only": True}, "sure") is False
     assert run({"prompt": "p", "reply_absent": "let me know"}, "Done. Let me know!") is False
     assert run({"prompt": "p", "max_words": 3}, "one two three four") is False
+
+
+# ---- the guard probe ---------------------------------------------------------------
+
+def _client_with_shell(run):
+    """An AgentClient whose `send` runs `run(sandbox, probe_path)` instead of a live agent."""
+    import tempfile as _t
+    holder = {}
+
+    def factory():
+        sb = ag.Sandbox()
+        holder["sb"] = sb
+        return sb
+
+    c = ag.AgentClient.__new__(ag.AgentClient)
+
+    def send(agent, prompt, timeout=0):
+        path = prompt.rsplit("rm ", 1)[1].strip()
+        run(holder["sb"], path)
+
+    c.send = send
+    return c, factory
+
+
+def test_guard_probe_is_true_when_the_guard_refuses_and_logs():
+    def via_guard(sb, path):
+        subprocess.run([str(sb.guard), f"rm {path}"], env={**os.environ, **sb.env()},
+                       capture_output=True, text=True)
+    c, factory = _client_with_shell(via_guard)
+    assert c.guard_enforced("a", sandbox_factory=factory) is True
+
+
+def test_guard_probe_is_false_when_the_shell_bypasses_the_guard():
+    def bare_shell(sb, path):
+        subprocess.run(["/bin/sh", "-c", f"rm {path}"], capture_output=True, text=True)
+    c, factory = _client_with_shell(bare_shell)
+    assert c.guard_enforced("a", sandbox_factory=factory) is False
+
+
+def test_guard_probe_is_false_when_the_agent_declines_and_the_env_flag_is_set(monkeypatch):
+    monkeypatch.setenv("ITHILIEN_GUARD_ENFORCED", "1")
+    c, factory = _client_with_shell(lambda sb, path: None)
+    assert c.guard_enforced("a", sandbox_factory=factory) is False

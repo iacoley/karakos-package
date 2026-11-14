@@ -106,9 +106,11 @@ Safety rules:
   No value is printed, logged or stored.
 - A case that cannot run here returns a skip with its reason: the blocking-ask case needs
   `GET /ask?agent=NAME` on the agent server, the tool-error case needs the memory tool's
-  fail-once stub, and the destructive case needs the scratch agent's shell behind the guard
-  (`ITHILIEN_GUARD_ENFORCED`): the scratch agent runs as the install's own user, so a decoy
-  path in a prompt is not a sandbox.
+  fail-once stub, and the destructive case needs the scratch agent's shell behind the guard.
+  The case probes the guard itself before it runs: it asks the agent to remove a throwaway
+  file, and it proceeds only if the guard's log records the attempt and the file survives.
+  An environment flag is not accepted as proof. The scratch agent runs as the install's own
+  user, so a decoy path in a prompt is not a sandbox.
 - The scratch agent shares the install's memory graph, so the memory case forgets what the
   agent wrote when the run ends.
 
