@@ -108,7 +108,8 @@ def run_agentic(a) -> int:
     token = os.environ.get("AGENT_SERVER_TOKEN", "")
     base = os.environ.get("AGENT_SERVER_URL") or \
         f"http://localhost:{os.environ.get('AGENT_SERVER_PORT', '18791')}"
-    client = agentic.AgentClient(base, token, workspace / "logs" / "agent-streams", channel)
+    client = agentic.AgentClient(base, token, workspace / "logs" / "agent-streams", channel,
+                                 workspace=workspace)
     ctx = agent_cases.Ctx(client=client, channel=channel, workspace=workspace,
                           meter=agentic.CostMeter(a.max_cost_usd),
                           env_names=agent_cases.allowlist_env_names(workspace))

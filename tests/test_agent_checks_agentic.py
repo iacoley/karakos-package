@@ -462,3 +462,42 @@ def test_guard_probe_is_false_when_the_agent_declines_and_the_env_flag_is_set(mo
     monkeypatch.setenv("ITHILIEN_GUARD_ENFORCED", "1")
     c, factory = _client_with_shell(lambda sb, path: None)
     assert c.guard_enforced("a", sandbox_factory=factory) is False
+
+
+# ---- the fail-once memory stub ---------------------------------------------------------
+
+def test_client_arms_the_fail_once_flag_and_teardown_clears_it(tmp_path):
+    c = ag.AgentClient("http://127.0.0.1:9", "t", tmp_path / "s", "1", workspace=tmp_path)
+    assert c.stub_memory_fail_once("ithilien-scratch") is True
+    flag = tmp_path / "data" / "agent-checks" / "fail-once" / "ithilien-scratch"
+    assert flag.is_file()
+    c.teardown("ithilien-scratch")
+    assert not flag.exists()
+    assert ag.AgentClient("http://127.0.0.1:9", "t", tmp_path, "1").stub_memory_fail_once("x") is False
+
+
+def _tools_server(monkeypatch, tmp_path, agent):
+    from conftest import import_script
+    monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setenv("KARAKOS_AGENT", agent)
+    return import_script("tools-server", file_path=ROOT / "mcp" / "tools-server.py")
+
+
+def test_tools_server_fails_memory_once_for_a_scratch_agent(monkeypatch, tmp_path):
+    ts = _tools_server(monkeypatch, tmp_path, "ithilien-scratch")
+    flag = tmp_path / "data" / "agent-checks" / "fail-once" / "ithilien-scratch"
+    assert ts._fail_once_armed() is False, "unarmed: no failure"
+    flag.parent.mkdir(parents=True)
+    flag.write_text("1")
+    assert ts._fail_once_armed() is True
+    assert not flag.exists()
+    assert ts._fail_once_armed() is False, "consumed: only the first call fails"
+
+
+def test_tools_server_ignores_the_flag_for_a_real_agent(monkeypatch, tmp_path):
+    ts = _tools_server(monkeypatch, tmp_path, "main")
+    flag = tmp_path / "data" / "agent-checks" / "fail-once" / "main"
+    flag.parent.mkdir(parents=True)
+    flag.write_text("1")
+    assert ts._fail_once_armed() is False
+    assert flag.exists(), "a real agent's flag is left alone"

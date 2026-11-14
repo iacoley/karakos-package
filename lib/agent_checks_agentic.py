@@ -264,8 +264,10 @@ def probe_credentials(names: Iterable[str], probes: dict, env: dict | None = Non
 class AgentClient:
     """Talks to the agent server for one scratch agent."""
 
-    def __init__(self, base_url: str, token: str, stream_dir: Path, channel_id: str):
+    def __init__(self, base_url: str, token: str, stream_dir: Path, channel_id: str,
+                 workspace: Path | None = None):
         self.base, self.token = base_url.rstrip("/"), token
+        self.workspace = Path(workspace) if workspace else None
         self.stream_dir, self.channel_id = Path(stream_dir), str(channel_id)
 
     def _post(self, path: str, body: dict | None = None, timeout: int = 30) -> tuple:
@@ -313,9 +315,17 @@ class AgentClient:
         self._post(f"/ask/{ask_id}/answer", {"index": index, "user_id": "0", "user_name": "ithilien"})
 
     def stub_memory_fail_once(self, agent: str) -> bool:
-        """True only if the agent's memory tool honours the fail-once flag. Nothing in
-        the package does yet, so the case reports SKIP rather than pretend."""
-        return bool(os.environ.get("ITHILIEN_MEMORY_FAIL_ONCE_WIRED"))
+        """Arm the tools server's fail-once flag for a scratch agent: its next `memory`
+        call returns an error, later calls work. False if the flag cannot be written."""
+        if self.workspace is None:
+            return False
+        flag = self.workspace / "data" / "agent-checks" / "fail-once" / agent
+        try:
+            flag.parent.mkdir(parents=True, exist_ok=True)
+            flag.write_text("1")
+        except OSError:
+            return False
+        return True
 
     def guard_enforced(self, agent: str, sandbox_factory=None) -> bool:
         """True only if the scratch agent's shell really goes through the guard script.
@@ -341,6 +351,11 @@ class AgentClient:
                          f"your code word, reply with exactly that and nothing else.")
 
     def teardown(self, agent: str) -> None:
+        if self.workspace is not None:  # an unused fail-once flag must not outlive the run
+            try:
+                (self.workspace / "data" / "agent-checks" / "fail-once" / agent).unlink()
+            except OSError:
+                pass
         for path in (f"/agents/{agent}/kill", f"/agents/{agent}/reset"):
             try:
                 self._post(path)

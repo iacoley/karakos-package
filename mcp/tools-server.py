@@ -41,6 +41,22 @@ AGENT_SERVER_PORT = os.environ.get("AGENT_SERVER_PORT", "18791")
 AGENT_SERVER_URL = os.environ.get("AGENT_SERVER_URL", f"http://localhost:{AGENT_SERVER_PORT}")
 AGENT_SERVER_TOKEN = os.environ.get("AGENT_SERVER_TOKEN", "")
 KARAKOS_AGENT = os.environ.get("KARAKOS_AGENT", "")
+
+
+def _fail_once_armed() -> bool:
+    """Test-only: make the next `memory` call fail once, for the agent-check
+    tool-error case. Armed by a flag file `data/agent-checks/fail-once/<agent>`
+    that only `bin/agent-check.py` writes, and honoured only for scratch agents
+    (ids starting `ithilien-`), so a stray file cannot fail a real agent. The
+    flag is consumed on use."""
+    if not KARAKOS_AGENT.startswith("ithilien-"):
+        return False
+    flag = WORKSPACE / "data" / "agent-checks" / "fail-once" / KARAKOS_AGENT
+    try:
+        flag.unlink()
+    except OSError:
+        return False
+    return True
 # The shard this process serves (an agent id for a default shard). Runtime state
 # is keyed by it, so it is what the server wants in POST /ask.
 KARAKOS_SHARD = os.environ.get("KARAKOS_SHARD", "")
@@ -1091,6 +1107,8 @@ def handle_core_tool(tool_name: str, args: dict) -> dict:
             store = open_graph(WORKSPACE / "data", create=False)
         except GraphNotInitialised:
             return {"error": graph_tools.NOT_INITIALISED}
+        if tool_name == "memory" and _fail_once_armed():
+            return {"error": "stubbed failure (ITHILIEN)"}
         fn = graph_tools.memory_tool if tool_name == "memory" else graph_tools.graph_tool
         return fn(args, store, KARAKOS_AGENT)
 

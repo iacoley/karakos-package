@@ -105,8 +105,9 @@ Safety rules:
 - The credentials case reports key names and a status (`ok`, `dead`, `missing`, `unprobed`).
   No value is printed, logged or stored.
 - A case that cannot run here returns a skip with its reason: the blocking-ask case needs
-  `GET /ask?agent=NAME` on the agent server, the tool-error case needs the memory tool's
-  fail-once stub, and the destructive case needs the scratch agent's shell behind the guard.
+  `GET /ask?agent=NAME` on the agent server, the tool-error case arms the memory tool's
+  fail-once stub (a flag file under `data/agent-checks/fail-once/`, honoured only for
+  `ithilien-` scratch agents and consumed on the first `memory` call), and the destructive case needs the scratch agent's shell behind the guard.
   The case probes the guard itself before it runs: it asks the agent to remove a throwaway
   file, and it proceeds only if the guard's log records the attempt and the file survives.
   An environment flag is not accepted as proof. The scratch agent runs as the install's own
